@@ -1,10 +1,11 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CSComputeAccel
 
-// Create a RenderTexture with enableRandomWrite flag and set it
+// For debugging. Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 RWTexture2D<float4> Result;
 
+// Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
 
 #define PI 3.14159265
@@ -26,22 +27,18 @@ cbuffer _ParticleConstantsBuf : register(b0)
 	half _Gravity;				// Magnitude of force due to gravity
 };
 
-//TODO: remove, use groupshareds
-struct FieldData
-{
-	float4 velocity;
-	float4 density;
-	float4 pressure;
-};
-StructuredBuffer<FieldData> _FieldDataBuf : register(t1);
+// Position inputs
+StructuredBuffer<float3> _ParticlePositionInputBuf : register(t1);
 
-StructuredBuffer<float3> _ParticlePositionInputBuf : register(t2);
+// Acceleration outputs
+StructuredBuffer<float3> _ParticleAccelOutputBuf : register(t2);
 
 // Density and pressure data for interim calculations. Also do kernels?
+//	groupshared is for sharing data among threads in a single thread group
 groupshared float3 particleDensity[ThreadGroupSize];
 groupshared float3 particlePressure[ThreadGroupSize];
 
-//TODO: is there a max of 16000 
+//TODO: is there a max of about 16000 particles? Because of groupshared memory limit and float3 size
 
 // The kernel function varies with distance from the center. If xi is the position of particle i and 
 //  x is some point in space, r=x-xi is the distance between them.
@@ -96,18 +93,17 @@ void TestOutput(uint3 id)
 	Result[id.xy] = float4(k, k, k, 1);
 }
 
-// groupshared: for sharing data among threads in a single thread group
 
 // numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. 64 threads is a good number.
 [numthreads(ThreadGroupSize, 1, 1)]
 // The group index is the flattened index of a thread within its group.
 void CSComputeAccel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex)
 {
-	
 	// Position of this particle
 	float3 particlePos = _ParticlePositionInputBuf[groupIdx];
 	// loop through all (nearby) particles, summing their total contribution from the kernel function
 
+	TestOutput(id);
 	
 	// calculate density
 }
