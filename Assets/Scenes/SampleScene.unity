@@ -223,12 +223,12 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 351b14e78a2db8a418b8fd201cb75dd8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxNumParticles: 100
+  maxNumParticles: 256
   particleMass: 0.1
   gravityStrength: 9.8
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
@@ -336,7 +336,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 623766201}
-  - component: {fileID: 623766200}
   m_Layer: 0
   m_Name: SPH Simulator
   m_TagString: Untagged
@@ -344,23 +343,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &623766200
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623766199}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 351b14e78a2db8a418b8fd201cb75dd8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  maxNumParticles: 10
-  particleMass: 0.1
-  gravityStrength: 9.8
-  SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
-  tex: {fileID: 0}
 --- !u!4 &623766201
 Transform:
   m_ObjectHideFlags: 0
@@ -369,7 +351,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 623766199}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.31149673, y: 1.4976273, z: -0.7368469}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

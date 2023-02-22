@@ -15,27 +15,19 @@ public class Main : MonoBehaviour
     [Header("Buffer & shader object properties")]
     // Buffer and parameter IDs
     static readonly int
-        constantsBufId = Shader.PropertyToID("_ParticleConstantsBuf"),
         particlePositionInputBufID = Shader.PropertyToID("_ParticlePositionInputBuf"),
-        //fieldDataId = Shader.PropertyToID("_FieldDataBuf"),
-        particleAccelOutputBufID = Shader.PropertyToID("_ParticleAccelOutputBuf");
+        particleAccelOutputBufID = Shader.PropertyToID("_ParticleAccelOutputBuf"),
+
+        maxNumParticlesID = Shader.PropertyToID("_MaxNumParticles"),
+        particleMassID = Shader.PropertyToID("_ParticleMass"),
+        gravityID = Shader.PropertyToID("_Gravity");
 
     // Main compute shader for calulating update to particle accelerations
     [SerializeField] ComputeShader SPHComputeShader;
 
     // For testing
     [SerializeField] RenderTexture tex;
-    [SerializeField]
-    struct SPHConstants
-    {
-        int maxNumParticles;
-        float particleMass;
-        float gravity;
-    }
-    const int sizeOfSPHConstants = sizeof(int) + sizeof(float) * 2;     // Remember to update when changing properties!!!!
 
-    // Buffer for constants to pass to shader
-    [SerializeField] ComputeBuffer constantsBuf;
     // Particle positions are given to the compute shader as an input
     [SerializeField] ComputeBuffer particlePositionInputBuf;
     // Buffer for the calculation results
@@ -50,9 +42,27 @@ public class Main : MonoBehaviour
     {
         ReleaseBuffers();
     }
+    private void FixedUpdate()
+    {
+        UpdateParticleAccelerations();
+    }
 
     // Render results of compute shader to render tex for testing
     private void OnRenderImage(RenderTexture source, RenderTexture destination)
+    {
+        int texWidth = 256;
+        if (tex == null)
+        {
+            tex = new RenderTexture(texWidth, texWidth, 24);
+            tex.enableRandomWrite = true;
+            tex.Create();
+        }
+
+        Graphics.Blit(tex, destination);
+    }
+
+
+    void InitializeBuffers()
     {
         if (tex == null)
         {
@@ -61,34 +71,17 @@ public class Main : MonoBehaviour
             tex.Create();
         }
 
-        //int main = computeShader.FindKernel("CSMain");
-        SPHComputeShader.SetTexture(0, "Result", tex);
-        SPHComputeShader.Dispatch(0, tex.width / 8, tex.height / 8, 1);
-
-        Graphics.Blit(tex, destination);
-    }
-
-    private void FixedUpdate()
-    {
-        UpdateParticleAccelerations();
-    }
-
-    void InitializeBuffers()
-    {
         int mainID = SPHComputeShader.FindKernel("CSComputeAccel");
 
         // TODO: is there a better way of computing this?
         int sizeofVec3 = sizeof(float) * 3;
 
-        constantsBuf = new ComputeBuffer(maxNumParticles, sizeOfSPHConstants, ComputeBufferType.Default, ComputeBufferMode.Immutable);
-
         // Define the particle position buffer as structured, with dynamic, unsynchronized access
         particlePositionInputBuf = new ComputeBuffer(maxNumParticles, sizeofVec3, ComputeBufferType.Default, ComputeBufferMode.SubUpdates);
-
         particleAccelOutputBuf = new ComputeBuffer(maxNumParticles, sizeofVec3, ComputeBufferType.Default, ComputeBufferMode.SubUpdates);
 
-        //TODO: write constants buffer and maybe also positions buffer here?
 
+        //TODO: write constants buffer and maybe also positions buffer here?
     }
     
     // Dispatch a job to the GPU to run a new SPH simulation step
@@ -97,27 +90,47 @@ public class Main : MonoBehaviour
         int mainID = SPHComputeShader.FindKernel("CSComputeAccel");
 
         // Set debug property because it blows up if you don't
-        SPHComputeShader.SetBuffer(mainID, Shader.PropertyToID("Results"), )
+        SPHComputeShader.SetTexture(mainID, Shader.PropertyToID("Result"), tex);
 
-        // Not using SetConstantBuffer for the constants struct because we want to be able to pass a struct (so need StructuredBuffer, aka ComputeBufferType.Default)
-        SPHComputeShader.SetBuffer(mainID, constantsBufId, constantsBuf);
         SPHComputeShader.SetBuffer(mainID, particlePositionInputBufID, particlePositionInputBuf);
         SPHComputeShader.SetBuffer(mainID, particleAccelOutputBufID, particleAccelOutputBuf);
 
-        //TODO: does this make sense?
-        // The number of thread groups is determined by spreading out the max number of particles over the number of threads per group.
+        // Set constants
+        SPHComputeShader.SetInt(maxNumParticlesID, maxNumParticles);
+        SPHComputeShader.SetFloat(particleMassID, particleMass);
+        SPHComputeShader.SetFloat(gravityID, gravityStrength);
         //  Make sure there's at least one thread group!
-        //int numThreadGroups = Mathf.Max(1, maxNumParticles / ThreadGroupSize);
 
-        //SPHComputeShader.Dispatch(mainID, numThreadGroups, 1, 1);
-        SPHComputeShader.Dispatch(mainID, 1, 1, 1);
 
+        // This works with [numthreads(8, 8, 1)]
+        //SPHComputeShader.Dispatch(0, tex.width / 8, tex.height / 8, 1);
+
+        // This works with [numthreads(64, 1, 1)]
+        //SPHComputeShader.Dispatch(0, tex.width*4, 1, 1);
+
+        // To process x items, with a kernel group size of ThreadGroupSize*1*1, call Dispatch(x/ThreadGroupSize, 1, 1)!!
+        // this is good!
+        //SPHComputeShader.Dispatch(0, 256*256 / ThreadGroupSize, 1, 1);
+
+        //SPHComputeShader.Dispatch(0, maxNumParticles * maxNumParticles / ThreadGroupSize, 1, 1);
+
+        // This works with [numthreads(16, 1, 1)]
+        //SPHComputeShader.Dispatch(0, tex.width * 16, 1, 1);
+
+        // Squared num particles because of the size of the test texture
+        int numThreadGroups = Mathf.Max(1, maxNumParticles * maxNumParticles / ThreadGroupSize);
+
+        SPHComputeShader.Dispatch(mainID, numThreadGroups, 1, 1);
     }
 
     void ReleaseBuffers()
     {
-        constantsBuf.Release();
         particlePositionInputBuf.Release();
         particleAccelOutputBuf.Release();
+    }
+
+    void SetupParticleSystem()
+    {
+
     }
 }

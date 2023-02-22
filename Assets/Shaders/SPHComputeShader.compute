@@ -1,10 +1,6 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CSComputeAccel
 
-// For debugging. Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
-RWTexture2D<float4> Result;
-
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
 
@@ -17,21 +13,23 @@ RWTexture2D<float4> Result;
 // TODO: No reason for this number, change it later
 #define ViscosityCoef 1
 
-// Organize constants into a constant buffer to be sent to the gpu all at once. Don' use float3s, only float4 or float2. Arrange members by decreasing size.
 //	https://docs.unity3d.com/Manual/SL-PlatformDifferences.html "Using buffers with GPU buffers"
-//TODO: why register? 
-cbuffer _ParticleConstantsBuf : register(b0)
-{
-	uint _MaxNumParticles;
-	half _ParticleMass;
-	half _Gravity;				// Magnitude of force due to gravity
-};
+//cbuffer _ParticleConstantsBuf : register(b0)
 
+// For debugging. Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+uint _MaxNumParticles;
+float _ParticleMass;
+float _Gravity;				// Magnitude of force due to gravity
+
+//TODO: why register? 
 // Position inputs
-StructuredBuffer<float3> _ParticlePositionInputBuf : register(t1);
+StructuredBuffer<float3> _ParticlePositionInputBuf;//: register(t0);
 
 // Acceleration outputs
-StructuredBuffer<float3> _ParticleAccelOutputBuf : register(t2);
+RWStructuredBuffer<float3> _ParticleAccelOutputBuf;//: register(u0);
 
 // Density and pressure data for interim calculations. Also do kernels?
 //	groupshared is for sharing data among threads in a single thread group
@@ -77,7 +75,7 @@ float KernelLaplacian(float r)
 // Find density given position
 float Density(float3 x)
 {
-	
+	return 0;
 }
 
 void TestOutput(uint3 id)
@@ -87,23 +85,39 @@ void TestOutput(uint3 id)
     //Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
 
 	// Gives a value between 0 and 2.5, normalize to 0 to 1
-	float k = Kernel(distance(id.xy, uint2(128, 128)));
+	//float k = Kernel(distance(id.xy, uint2(128, 128)));
 	//Result[id.xy] = float4(k, k, k, 1);
 	
-	Result[id.xy] = float4(k, k, k, 1);
+	//Result[id.xy] = float4(k, k, k, 1);
+	
+	float w = 256;
+	uint2 id2D = uint2(fmod(id.x, w), floor(id.x / w));
+	Result[id2D.xy] = float4(id2D.x & id2D.y, (id2D.x & 15) / 15.0, (id2D.y & 15) / 15.0, 0.0) * _ParticleMass;
 }
 
 
-// numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. 64 threads is a good number.
+// numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. A multiple of 64 threads is a good number bc the thread warp size is either 32 or 64 depending on gpu.
 [numthreads(ThreadGroupSize, 1, 1)]
+
 // The group index is the flattened index of a thread within its group.
 void CSComputeAccel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex)
 {
 	// Position of this particle
-	float3 particlePos = _ParticlePositionInputBuf[groupIdx];
+	//float3 particlePos = _ParticlePositionInputBuf[groupIdx];
 	// loop through all (nearby) particles, summing their total contribution from the kernel function
-
+	
 	TestOutput(id);
 	
 	// calculate density
+	
+	//GroupMemoryBarrierWithGroupSync();
+
+	// calculate pressure and pressure gradient
+	
+	//GroupMemoryBarrierWithGroupSync();
+	
+	// calculate vector field laplacian
+	
+	//GroupMemoryBarrierWithGroupSync();
+	
 }
