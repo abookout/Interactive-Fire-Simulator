@@ -1,0 +1,113 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSComputeAccel
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+#define ThreadGroupSize 64
+
+#define PI 3.14159265
+// The kernel's finite support. Note that the support radius is 2*KernelSupport (goes exactly to 0 at +- radius).
+//TODO: use constant buffers for constants, and pass them using structs
+#define KernelSupport 1
+#define sInv (1 / KernelSupport)
+
+// TODO: No reason for this number, change it later
+#define ViscosityCoef 1
+
+// Organize constants into a constant buffer to be sent to the gpu all at once. Don' use float3s, only float4 or float2. Arrange members by decreasing size.
+//	https://docs.unity3d.com/Manual/SL-PlatformDifferences.html "Using buffers with GPU buffers"
+//TODO: why register? 
+cbuffer _ParticleConstantsBuf : register(b0)
+{
+	uint _MaxNumParticles;
+	half _ParticleMass;
+	half _Gravity;				// Magnitude of force due to gravity
+};
+
+//TODO: remove, use groupshareds
+struct FieldData
+{
+	float4 velocity;
+	float4 density;
+	float4 pressure;
+};
+StructuredBuffer<FieldData> _FieldDataBuf : register(t1);
+
+StructuredBuffer<float3> _ParticlePositionInputBuf : register(t2);
+
+// Density and pressure data for interim calculations. Also do kernels?
+groupshared float3 particleDensity[ThreadGroupSize];
+groupshared float3 particlePressure[ThreadGroupSize];
+
+//TODO: is there a max of 16000 
+
+// The kernel function varies with distance from the center. If xi is the position of particle i and 
+//  x is some point in space, r=x-xi is the distance between them.
+//TODO: optimizations: branchless, precompute formula, MAD
+float Kernel(float r)
+{
+    // Textbook pg 289
+	float rOverS = r * sInv;
+	
+	// 1 / (pi*s^3)
+	//float piFactor = pow(sInv, 3) / 3.1415;
+	float piFactor = 1 / (PI * pow(KernelSupport, 3));
+    
+	if (rOverS < 0 || rOverS > 2)
+		return 0;
+	else if (rOverS <= 1)
+        // Between 0 <= r/s <= 1
+		return piFactor * (1 - 1.5 * pow(rOverS, 2) + 0.75 * pow(rOverS, 3));
+	else if (rOverS <= 2)
+		// Between 1 <= r/s <= 2
+		return piFactor * (0.25 * pow(2 - rOverS, 3));
+    
+}
+
+// TODO: implement formulas from text p 289
+float KernelGradient(float r)
+{
+	return 0;
+}
+float KernelLaplacian(float r)
+{
+	return 0;
+}
+
+
+// Find density given position
+float Density(float3 x)
+{
+	
+}
+
+void TestOutput(uint3 id)
+{
+	
+    // TODO: insert actual code here!
+    //Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
+
+	// Gives a value between 0 and 2.5, normalize to 0 to 1
+	float k = Kernel(distance(id.xy, uint2(128, 128)));
+	//Result[id.xy] = float4(k, k, k, 1);
+	
+	Result[id.xy] = float4(k, k, k, 1);
+}
+
+// groupshared: for sharing data among threads in a single thread group
+
+// numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. 64 threads is a good number.
+[numthreads(ThreadGroupSize, 1, 1)]
+// The group index is the flattened index of a thread within its group.
+void CSComputeAccel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex)
+{
+	
+	// Position of this particle
+	float3 particlePos = _ParticlePositionInputBuf[groupIdx];
+	// loop through all (nearby) particles, summing their total contribution from the kernel function
+
+	
+	// calculate density
+}
