@@ -1,18 +1,13 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Collections;
 
 public class Main : MonoBehaviour
 {
     // This should match with the SPH CS!
     const int ThreadGroupSize = 64;
 
-    [Header("Parameters to set in inspector")]
-    [SerializeField] int maxNumParticles = 100;
-    [SerializeField] float particleMass = 0.1f;
-    [SerializeField] float gravityStrength = 9.8f;
-
-    [Header("Buffer & shader object properties")]
     // Buffer and parameter IDs
     static readonly int
         particlePositionInputBufID = Shader.PropertyToID("_ParticlePositionInputBuf"),
@@ -20,13 +15,25 @@ public class Main : MonoBehaviour
 
         maxNumParticlesID = Shader.PropertyToID("_MaxNumParticles"),
         particleMassID = Shader.PropertyToID("_ParticleMass"),
+        pressureStiffnessID = Shader.PropertyToID("_PressureStiffness"),
+        referenceDensityID = Shader.PropertyToID("_ReferenceDensity"),
         gravityID = Shader.PropertyToID("_Gravity");
 
+    [Header("Set in inspector")]
+    [SerializeField] new ParticleSystem particleSystem;
+    [SerializeField] int maxNumParticles = 32;
+    [SerializeField] float particleMass = 0.1f;
+    [SerializeField] float pressureStiffness = 1f;
+    [SerializeField] float referenceDensity = 1f;      // Probably choose atmostpheric pressure
+    [SerializeField] float gravityStrength = 9.8f;
+
     // Main compute shader for calulating update to particle accelerations
+    [Header("Buffer & shader object properties")]
     [SerializeField] ComputeShader SPHComputeShader;
 
     // For testing
     [SerializeField] RenderTexture tex;
+    //[SerializeField] Texture3D tex;
 
     // Particle positions are given to the compute shader as an input
     [SerializeField] ComputeBuffer particlePositionInputBuf;
@@ -37,6 +44,7 @@ public class Main : MonoBehaviour
     private void OnEnable()
     {
         InitializeBuffers();
+        SetupParticleSystem();
     }
     private void OnDisable()
     {
@@ -48,27 +56,36 @@ public class Main : MonoBehaviour
     }
 
     // Render results of compute shader to render tex for testing
-    private void OnRenderImage(RenderTexture source, RenderTexture destination)
-    {
-        int texWidth = 256;
-        if (tex == null)
-        {
-            tex = new RenderTexture(texWidth, texWidth, 24);
-            tex.enableRandomWrite = true;
-            tex.Create();
-        }
+    //private void OnRenderImage(RenderTexture source, RenderTexture destination)
+    //{
+    //    int texWidth = 256;
+    //    if (tex == null)
+    //    {
+    //        tex = new RenderTexture(texWidth, texWidth, 24);
+    //        tex.enableRandomWrite = true;
+    //        tex.Create();
+    //    }
 
-        Graphics.Blit(tex, destination);
-    }
+    //    Graphics.Blit(tex, destination);
+    //}
 
 
     void InitializeBuffers()
     {
         if (tex == null)
         {
-            tex = new RenderTexture(256, 256, 24);
+            tex = new RenderTexture(maxNumParticles, maxNumParticles, 0, RenderTextureFormat.ARGBFloat);
+            tex.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
+            tex.volumeDepth = maxNumParticles;
             tex.enableRandomWrite = true;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Point;
             tex.Create();
+
+            //tex = new Texture3D(256, 256, 256, TextureFormat.RGBA32, mipChain: false, createUninitialized: true);
+            //tex.wrapMode = TextureWrapMode.Clamp;
+            //tex.filterMode = FilterMode.Point;
+            //tex.Apply();
         }
 
         int mainID = SPHComputeShader.FindKernel("CSComputeAccel");
@@ -98,6 +115,8 @@ public class Main : MonoBehaviour
         // Set constants
         SPHComputeShader.SetInt(maxNumParticlesID, maxNumParticles);
         SPHComputeShader.SetFloat(particleMassID, particleMass);
+        SPHComputeShader.SetFloat(pressureStiffnessID, pressureStiffness);
+        SPHComputeShader.SetFloat(referenceDensityID, referenceDensity);
         SPHComputeShader.SetFloat(gravityID, gravityStrength);
         //  Make sure there's at least one thread group!
 
@@ -118,7 +137,7 @@ public class Main : MonoBehaviour
         //SPHComputeShader.Dispatch(0, tex.width * 16, 1, 1);
 
         // Squared num particles because of the size of the test texture
-        int numThreadGroups = Mathf.Max(1, maxNumParticles * maxNumParticles / ThreadGroupSize);
+        int numThreadGroups = Mathf.Max(1, maxNumParticles * maxNumParticles * maxNumParticles / ThreadGroupSize);
 
         SPHComputeShader.Dispatch(mainID, numThreadGroups, 1, 1);
     }
@@ -129,8 +148,30 @@ public class Main : MonoBehaviour
         particleAccelOutputBuf.Release();
     }
 
+    // Needs the buffers to have been initialized first
     void SetupParticleSystem()
     {
+        ParticleSystem.Particle[] particles = new ParticleSystem.Particle[maxNumParticles];
+        //particles = new ParticleSystem.Particle[maxNumParticles];
+        // This is how you set particle system struct b/c it's a struct that exposes the underlying implementation
+        var main = particleSystem.main;
+        main.maxParticles = maxNumParticles;
 
+        //var shape = particleSystem.shape;
+        particleSystem.Emit(maxNumParticles);
+
+        // Populate particles array from system
+        particleSystem.GetParticles(particles);
+
+        NativeArray<Vector3> GPUArray = particlePositionInputBuf.BeginWrite<Vector3>(0, maxNumParticles);
+        for (int i = 0; i < maxNumParticles; i++)
+        {
+            GPUArray[i] = particles[i].position;
+        }
+        particlePositionInputBuf.EndWrite<Vector3>(maxNumParticles);
+
+        // TODO: Set position and scale of a bounding box for the fire to exist for the sake of keeping the fire localized (??)
+
+        //particleSystem.SetParticles(particles, maxNumParticles);
     }
 }
