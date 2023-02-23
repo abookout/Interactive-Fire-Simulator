@@ -4,6 +4,8 @@
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
 
+#define MaxNumParticles 256
+
 #define PI 3.14159265
 // The kernel's finite support. Note that the support radius is 2*KernelSupport (goes exactly to 0 at +- radius).
 //TODO: use constant buffers for constants, and pass them using structs
@@ -19,21 +21,23 @@
 // For debugging. Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 //RWTexture2D<float4> Result;
-RWTexture3D<float> Result;
+RWTexture3D<float4> Result;
 
-uint _MaxNumParticles;
+int _NumParticles;
 half _ParticleMass;
 half _PressureStiffness;
 half _ReferenceDensity;
-half _Gravity;				// Magnitude of force due to gravity
+// Magnitude of force due to gravity, and all other external accelerations. Note: when applying a force to a single particle, 
+//	need to scale by the particle's local density! text p. 288
+float3 _ExternalAccelerations;	
 
 //TODO: why register? 
 // Position inputs
 StructuredBuffer<float3> _ParticlePositionInputBuf;//: register(t0);
+StructuredBuffer<float3> _ParticleVelocityInputBuf; //: register(t1);
 
 // Acceleration outputs
 RWStructuredBuffer<float3> _ParticleAccelOutputBuf;//: register(u0);
-
 
 //TODO: is there a max of about 16000 particles? Because of groupshared memory limit and float3 size
 
@@ -54,13 +58,12 @@ float Kernel(float r)
 	else if (rOverS <= 1)
         // Between 0 <= r/s <= 1
 		return piFactor * (1 - 1.5 * pow(rOverS, 2) + 0.75 * pow(rOverS, 3));
-	else if (rOverS <= 2)
+	else //if (rOverS <= 2)
 		// Between 1 <= r/s <= 2
 		return piFactor * (0.25 * pow(2 - rOverS, 3));
     
 }
-
-float KernelGradient(float r)
+float KernelDerivative(float r)
 {
 	float rOverS = r * sInv;
 	float piFactor = 1 / (PI * pow(KernelSupport, 4));
@@ -70,9 +73,19 @@ float KernelGradient(float r)
 	else if (rOverS <= 1)
         // Between 0 <= r/s <= 1
 		return piFactor * 3 * rOverS * mad(0.75, rOverS, -1);
-	else if (rOverS <= 2)
+	else //if (rOverS <= 2)
 		// Between 1 <= r/s <= 2
 		return piFactor * (-0.75 * pow(2 - rOverS, 2));
+}
+//TODO: the gradient must be a vector, right?????? To make the pressure gradient term a vector???
+// The gradient of a single varible function is a scalar! Partial with respect to r is just d/dr! This function must take a 3d pos argument then, right?
+// This might be right, look at text p 269
+float3 KernelGradient(float3 r)
+{
+	float x = KernelDerivative(r.x);
+	float y = KernelDerivative(r.y);
+	float z = KernelDerivative(r.z);
+	return float3(x, y, z);
 }
 float KernelLaplacian(float r)
 {
@@ -84,21 +97,16 @@ float KernelLaplacian(float r)
 	else if (rOverS <= 1)
         // Between 0 <= r/s <= 1
 		return piFactor * 3 * mad(1.5, rOverS, -1);
-	else if (rOverS <= 2)
+	else //if (rOverS <= 2)
 		// Between 1 <= r/s <= 2
 		return piFactor * mad(1.5, -rOverS, 3);		// (3/2)*(2 - rOverS) = 3 - 1.5*rOverS
 }
 
-float Pressure(float density)
-{
-	return _PressureStiffness * (
-}
-
+// For testing - writing to output texture2d or 3d
 uint2 flatTo2D(uint1 val, int w)
 {
 	return uint2(fmod(val, w), floor(val / w));
 }
-
 uint3 flatTo3D(uint1 val, int w, int h)
 {
 	return uint3(fmod(val, w), fmod(val / w, h), floor(val / (w * h)));
@@ -116,21 +124,23 @@ void TestOutput(uint3 id)
 	
 	//Result[id.xy] = float4(k, k, k, 1);
 	
-	float w = _MaxNumParticles;
+	float w = MaxNumParticles;
 	//uint2 id2D = uint2(fmod(id.x, w), floor(id.x / w));
 	//Result[id2D.xy] = float4(id2D.x & id2D.y, (id2D.x & 15) / 15.0, (id2D.y & 15) / 15.0, 0.0) * _ParticleMass;
 	
 	uint3 id3D = flatTo3D(id.x, w, w);
 	//Result[id3D] = float4(1.0f, 0.0f, 0.0f, 1.0f);
-	Result[id3D.xyz] = float3(id3D.x & id3D.y & id3D.z, (id3D.x & 15) / 15.0, (id3D.y & 15) / 15.0) * _ParticleMass;
+	Result[id3D.xyz] = float4(id3D.x & id3D.y & id3D.z, (id3D.x & 15) / 15.0, (id3D.y & 15) / 15.0, 0.0) * _ParticleMass;
 }
 
 
 // Density and pressure data for interim calculations. Also do kernels?
 //	groupshared is for sharing data among threads in a single thread group
-groupshared float3 particleDensity[ThreadGroupSize];
-groupshared float3 particlePressure[ThreadGroupSize];
-groupshared float particleKernel[ThreadGroupSize];		// Reused for the gradient and laplacian also
+groupshared float particleDensity[MaxNumParticles];
+groupshared float particlePressure[MaxNumParticles];
+groupshared float3 particlePressureGradient[MaxNumParticles];
+groupshared float3 particleLaplacian[MaxNumParticles];
+//groupshared float particleKernel[ThreadGroupSize];		// Reused for the gradient and laplacian also
 
 // numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. A multiple of 64 threads is a good number bc the thread warp size is either 32 or 64 depending on gpu.
 [numthreads(ThreadGroupSize, 1, 1)]
@@ -138,6 +148,9 @@ groupshared float particleKernel[ThreadGroupSize];		// Reused for the gradient a
 // The group index is the flattened index of a thread within its group.
 void CSComputeAccel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex)
 {
+	// Clamp number of particles so it doesn't exceed max
+	uint numParticles = min(_NumParticles, MaxNumParticles);
+	
 	// Position of this particle
 	float3 particlePos = _ParticlePositionInputBuf[groupIdx];
 
@@ -147,30 +160,59 @@ void CSComputeAccel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupInde
 	//float2 tmp = float4(particlePos, 0);
 	//Result[id3D] = tmp;
 
-	// loop through all (TODO: nearby) particles, summing their total contribution from the kernel function
-	for (int i = 0; i < _MaxNumParticles; i++)
+	// Loop through all (TODO: nearby) particles to calculate this particle's density
+	for (int i = 0; i < _NumParticles; i++)
 	{
 		float dist = distance(particlePos, _ParticlePositionInputBuf[i]);
 		float kernelVal = Kernel(dist);
 
-		particleKernel[id.x] = kernelVal;
+		//particleKernel[id.x] = kernelVal;
+		// Formula for particle density
 		particleDensity[id.x] = _ParticleMass * kernelVal;
 	}
-	
 	GroupMemoryBarrierWithGroupSync();
 	
+	// Calculate pressure of all particles
 	float thisDensity = particleDensity[id.x];
-
-	// calculate pressure and pressure gradient
-	for (int i = 0; i < _MaxNumParticles; i++)
+	for (int i = 0; i < _NumParticles; i++)
 	{
-		float thisPressure = _PressureStiffness * (particleDensity[i] - thisDensity);
+		// Formula for particle pressure
+		particlePressure[id.x] = _PressureStiffness * (particleDensity[i] - thisDensity);
 
 	}
-	//GroupMemoryBarrierWithGroupSync();
+	GroupMemoryBarrierWithGroupSync();
 	
-	// calculate vector field laplacian
-	
-	//GroupMemoryBarrierWithGroupSync();
-	
+	// Calculate pressure gradients and the laplacians - these don't rely on each other so they can be done at the same time
+	for (int i = 0; i < _NumParticles; i++)
+	{
+		// Pressure gradient
+		
+		float3 dist = particlePos - _ParticlePositionInputBuf[i];
+		float3 kernelGrad = KernelGradient(dist);
+		
+		float thisInvDensity = 1 / thisDensity;
+		float otherInvDensity = 1 / particleDensity[i];
+		
+		float thisPressureOverSquaredDensity = particlePressure[id.x] * thisInvDensity * thisInvDensity;
+
+		float otherPressureOverSquaredDensity = particlePressure[i] * otherInvDensity * otherInvDensity;
+
+		// Formula for pressure gradient
+		particlePressureGradient[id.x] = _ParticleMass * (thisPressureOverSquaredDensity + otherPressureOverSquaredDensity) * kernelGrad;
+
+		// Laplacian
+		
+		float kernelLap = KernelLaplacian(length(dist));
+		float3 thisVel = _ParticleVelocityInputBuf[id.x];
+		float3 otherVel = _ParticlePositionInputBuf[i];
+		
+		// Formula for laplacian
+		particleLaplacian[id.x] = _ParticleMass * (otherVel - thisVel) * thisInvDensity * kernelLap;
 	}
+	GroupMemoryBarrierWithGroupSync();
+
+	// Finally, write to the output!
+	//TODO: viscosity coefficient
+	_ParticleAccelOutputBuf[id.x] = -particlePressureGradient[id.x] + particleLaplacian[id.x] + _ExternalAccelerations;
+	
+}
