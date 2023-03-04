@@ -229,11 +229,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   particleSystem: {fileID: 2054306561}
-  maxNumParticles: 128
+  numParticles: 32
   particleMass: 0.1
   pressureStiffness: 0.1
   referenceDensity: 1
-  gravityStrength: 9.8
+  externalAccelerations: {x: 0, y: -9.8, z: 0}
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
   tex: {fileID: 0}
 --- !u!1 &410087039
