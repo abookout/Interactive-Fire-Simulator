@@ -20,9 +20,14 @@
 #define ViscosityCoef 1
 //	https://docs.unity3d.com/Manual/SL-PlatformDifferences.html "Using buffers with GPU buffers"
 
+struct ParticleData
+{
+	float3 position;
+	float3 velocity;
+};
+
 // For debugging. Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
-//RWTexture2D<float4> Result;
 RWTexture3D<float4> Result;
 
 float _DeltaTime;
@@ -35,14 +40,18 @@ half _ReferenceDensity;
 float3 _ExternalAccelerations;	
 
 //TODO: why register? 
-// Position inputs
-RWStructuredBuffer<float3> _ParticlePositionIOBuf : register(u1);
-StructuredBuffer<float3> _ParticleVelocityInputBuf : register(t1);
+StructuredBuffer<ParticleData> _DataInputBuffer; //: register(u1);
+StructuredBuffer<float3> _AccelerationInputBuffer; // : register(u2);
+
+RWStructuredBuffer<ParticleData> _DataOutputBuffer; //: register(u1);
+RWStructuredBuffer<float3> _AccelerationOutputBuffer;// : register(u2);
+
+//StructuredBuffer<float3> _VelocityInputBuffer;// : register(t1);
 
 // Acceleration outputs
-RWStructuredBuffer<float3> _ParticleAccelIOBuf : register(u2);
 
 //TODO: is there a max of about 16000 particles? Because of groupshared memory limit and float3 size
+//	maybe unless we do calculations for more than one particle per thread!
 
 // The kernel function varies with distance from the center. If xi is the position of particle i and 
 //  x is some point in space, r=x-xi is the distance between them.
@@ -155,14 +164,11 @@ groupshared float3 particleLaplacian[MaxNumParticles];
 // SV_DispatchThreadID = SV_GroupID * numthreads + SV_GroupThreadID. For 1d numthreads, id.x represents one unit of calculation (one particle)
 void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex, uint3 gid : SV_GroupID)
 {
-	// Clamp number of particles so it doesn't exceed max
-	uint numParticles = min(_NumParticles, MaxNumParticles);
-	
 	// Just return value of gravity for testing
-	_ParticleAccelIOBuf[id.x] = _ExternalAccelerations;
+	_AccelerationOutputBuffer[id.x] = _ExternalAccelerations;
 	
 	// Position of this particle
-	//float3 particlePos = _ParticlePositionIOBuf[groupIdx];
+	//float3 particlePos = _PositionInputBuffer[groupIdx];
 
 	//uint3 id3D = flatTo3D(id.x, MaxNumParticles, MaxNumParticles);
 	//float4 tmp = float4(particlePos, 1);
@@ -173,7 +179,7 @@ void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_Grou
 	int i = 0;
 	for (i = 0; i < _NumParticles; i++)
 	{
-		float dist = distance(particlePos, _ParticlePositionIOBuf[i]);
+		float dist = distance(particlePos, _PositionInputBuffer[i]);
 		float kernelVal = Kernel(dist);
 
 		//particleKernel[id.x] = kernelVal;
@@ -197,7 +203,7 @@ void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_Grou
 	{
 		// Pressure gradient
 		
-		float3 dist = particlePos - _ParticlePositionIOBuf[i];
+		float3 dist = particlePos - _PositionInputBuffer[i];
 		float3 kernelGrad = KernelGradient(dist);
 		
 		float thisInvDensity = 1 / thisDensity;
@@ -213,8 +219,8 @@ void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_Grou
 		// Laplacian
 		
 		float kernelLap = KernelLaplacian(length(dist));
-		float3 thisVel = _ParticleVelocityInputBuf[id.x];
-		float3 otherVel = _ParticlePositionIOBuf[i];
+		float3 thisVel = _VelocityInputBuffer[id.x];
+		float3 otherVel = _PositionInputBuffer[i];
 		
 		// Formula for laplacian
 		particleLaplacian[id.x] = _ParticleMass * (otherVel - thisVel) * thisInvDensity * kernelLap;
@@ -223,9 +229,10 @@ void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_Grou
 
 	// Finally, write to the output!
 	//TODO: viscosity coefficient
-	_ParticleAccelIOBuf[id.x] = -particlePressureGradient[id.x] + particleLaplacian[id.x] + _ExternalAccelerations;
+	_AccelerationOutputBuffer[id.x] = -particlePressureGradient[id.x] + particleLaplacian[id.x] + _ExternalAccelerations;
 	*/
 }
+
 
 [numthreads(ThreadGroupSize, 1, 1)]
 
@@ -236,8 +243,18 @@ void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_Grou
 void ComputePosition(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex, uint3 gid : SV_GroupID)
 {
 	// Use symplectic euler to update position
-	float3 vel = _ParticleVelocityInputBuf[id.x] + _ParticleAccelIOBuf[id.x] * _DeltaTime;
-	float3 pos = _ParticlePositionIOBuf[id.x] + vel * _DeltaTime;
+	ParticleData oldData = _DataInputBuffer[id.x];
+	float3 oldPos = oldData.position;
+	float3 oldVel = oldData.velocity;
+	float3 accel = _AccelerationInputBuffer[id.x];
 	
-	_ParticlePositionIOBuf[id.x] = pos;
+	// Symplectic
+	float3 newVel = oldVel + accel * _DeltaTime;
+	float3 newPos = oldPos + newVel * _DeltaTime;
+
+	ParticleData data;
+	data.position = newPos;
+	data.velocity = newVel;
+	
+	_DataOutputBuffer[id.x] = data;
 }

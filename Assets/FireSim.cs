@@ -11,9 +11,11 @@ public class Main : MonoBehaviour
 
     // Buffer and parameter IDs
     static readonly int
-        particlePositionIOBufID = Shader.PropertyToID("_ParticlePositionIOBuf"),
-        particleVelocityInputBufID = Shader.PropertyToID("_ParticleVelocityInputBuf"), 
-        particleAccelIOBufID = Shader.PropertyToID("_ParticleAccelIOBuf"),
+        dataInputBufID = Shader.PropertyToID("_DataInputBuffer"),
+        accelerationInputBufID = Shader.PropertyToID("_AccelerationInputBuffer"),
+
+        dataOutputBufID = Shader.PropertyToID("_DataOutputBuffer"),
+        accelerationOutputBufID = Shader.PropertyToID("_AccelerationOutputBuffer"),
 
         deltaTimeID = Shader.PropertyToID("_DeltaTime"),
         numParticlesID = Shader.PropertyToID("_NumParticles"),
@@ -36,14 +38,20 @@ public class Main : MonoBehaviour
 
     // For testing
     [SerializeField] RenderTexture tex;
-    //[SerializeField] Texture3D tex;
+
+    struct ParticleData
+    {
+        public Vector3 position;
+        public Vector3 velocity;
+    }
+    const int sizeofParticleData = sizeof(float) * 3 * 2;
 
     // Particle positions and current velocities are given to the acceleration compute shader as an input.
     //  Position is then set by the ComputePosition kernel by integration.
-    [SerializeField] ComputeBuffer particlePositionIOBuf;
-    [SerializeField] ComputeBuffer particleVelocityInputBuf;
+    [SerializeField] ComputeBuffer particleDataInputBuffer;
+    [SerializeField] ComputeBuffer particleDataOutputBuffer;
     // Buffer for the calculation results
-    [SerializeField] ComputeBuffer particleAccelIOBuf;
+    [SerializeField] ComputeBuffer particleAccelerationBuffer;
 
     // Using OnEnable instead of start or awake so that the buffers are refreshed every hot reload
     private void OnEnable()
@@ -99,12 +107,12 @@ public class Main : MonoBehaviour
 
         int sizeofVec3 = sizeof(float) * 3;
 
-        // Define the particle position buffer as structured, with dynamic, unsynchronized access.
-        // Allocate the maximum amount of particles so that we don't need to keep creating new buffers when the number of particles changes
-        particlePositionIOBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3, ComputeBufferType.Default, ComputeBufferMode.SubUpdates);
-        particleVelocityInputBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3, ComputeBufferType.Default, ComputeBufferMode.SubUpdates);
         // note: SubUpdates prevents RenderDoc from viewing the buffer contents
-        particleAccelIOBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3, ComputeBufferType.Default);
+
+        // Allocate the maximum amount of particles so that we don't need to keep creating new buffers when the number of particles changes
+        particleDataInputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
+        particleDataOutputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
+        particleAccelerationBuffer = new ComputeBuffer(MaxNumParticles, sizeofVec3);
 
         // Initialize buffers, using unity's particle system emission shape to choose random initial positions in a box
         //var psShape = particleSystem.shape;
@@ -112,28 +120,27 @@ public class Main : MonoBehaviour
         ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
         particleSystem.GetParticles(particles);
 
-        Vector3[] posArr = new Vector3[MaxNumParticles];
-        Vector3[] velArr = new Vector3[MaxNumParticles];
+        ParticleData[] dataArr = new ParticleData[MaxNumParticles];
         Vector3[] accArr = new Vector3[MaxNumParticles];
         for (int i = 0; i < MaxNumParticles; i++)
         {
             if (i < numParticles)
-                posArr[i] = particles[i].position;
+                dataArr[i].position = particles[i].position;
             else
-                posArr[i] = Vector3.zero;
-            velArr[i] = Vector3.zero;
+                dataArr[i].position = Vector3.zero;
+            dataArr[i].velocity = Vector3.zero;
             accArr[i] = Vector3.zero;
         }
-        particlePositionIOBuf.SetData(posArr);
-        particleVelocityInputBuf.SetData(velArr);
-        particleAccelIOBuf.SetData(accArr);
+        particleDataInputBuffer.SetData(dataArr);
+        particleDataOutputBuffer.SetData(dataArr);       // Initialize output with the same data as input
+        particleAccelerationBuffer.SetData(accArr);
     }
 
     void ReleaseBuffers()
     {
-        particlePositionIOBuf.Release();
-        particleVelocityInputBuf.Release();
-        particleAccelIOBuf.Release();
+        particleDataInputBuffer.Release();
+        particleDataOutputBuffer.Release();
+        particleAccelerationBuffer.Release();
     }
 
     // Write current particle positions and velocities for acceleration CS
@@ -142,21 +149,28 @@ public class Main : MonoBehaviour
         ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
         particleSystem.GetParticles(particles);
 
+        //TODO: maintain position and velocity arrays so don't need to access from particle system? Not sure if this is a problem
+        ParticleData[] dataArray = new ParticleData[numParticles];
 
-
-        //TODO: make compute buffer mode Dynamic for all buffers and just use SetData instead of BeginWrite so we can see buffer contents in RenderDoc!!!!!!
-
-
-
-        NativeArray<Vector3> GPUPosArray = particlePositionIOBuf.BeginWrite<Vector3>(0, numParticles);
-        NativeArray<Vector3> GPUVelArray = particleVelocityInputBuf.BeginWrite<Vector3>(0, numParticles);
         for (int i = 0; i < numParticles; i++)
         {
-            GPUPosArray[i] = particles[i].position;
-            GPUVelArray[i] = particles[i].velocity;
+            dataArray[i].position = particles[i].position;
+            dataArray[i].velocity = particles[i].velocity;
         }
-        particleVelocityInputBuf.EndWrite<Vector3>(numParticles);
-        particlePositionIOBuf.EndWrite<Vector3>(numParticles);
+
+        particleDataInputBuffer.SetData(dataArray);
+
+        // This may speed it up later, using SubUpdates 
+
+        //NativeArray<Vector3> GPUPosArray = particlePositionBuffer.BeginWrite<Vector3>(0, numParticles);
+        //NativeArray<Vector3> GPUVelArray = particleVelocityBuffer.BeginWrite<Vector3>(0, numParticles);
+        //for (int i = 0; i < numParticles; i++)
+        //{
+        //    GPUPosArray[i] = particles[i].position;
+        //    GPUVelArray[i] = particles[i].velocity;
+        //}
+        //particleVelocityBuffer.EndWrite<Vector3>(numParticles);
+        //particlePositionBuffer.EndWrite<Vector3>(numParticles);
     }
 
     // Dispatch a job to the GPU to run a new SPH simulation step
@@ -164,11 +178,12 @@ public class Main : MonoBehaviour
     {
         int kernelID = SPHComputeShader.FindKernel("ComputeAcceleration");
 
+        // Acceleration computation uses position and velocity as inputs, and accel as output
+        SPHComputeShader.SetBuffer(kernelID, dataInputBufID, particleDataInputBuffer);
+        //SPHComputeShader.SetBuffer(kernelID, velocityInputBufID, particleVelocityBuffer);
+        SPHComputeShader.SetBuffer(kernelID, accelerationOutputBufID, particleAccelerationBuffer);
         // Set debug property because it blows up if you don't
         SPHComputeShader.SetTexture(kernelID, Shader.PropertyToID("Result"), tex);
-        SPHComputeShader.SetBuffer(kernelID, particlePositionIOBufID, particlePositionIOBuf);
-        SPHComputeShader.SetBuffer(kernelID, particleVelocityInputBufID, particleVelocityInputBuf);
-        SPHComputeShader.SetBuffer(kernelID, particleAccelIOBufID, particleAccelIOBuf);
 
         SPHComputeShader.SetInt(numParticlesID, numParticles);
         SPHComputeShader.SetFloat(particleMassID, particleMass);
@@ -192,9 +207,13 @@ public class Main : MonoBehaviour
 
         // Dispatch the position computation CS
         kernelID = SPHComputeShader.FindKernel("ComputePosition");
-        SPHComputeShader.SetBuffer(kernelID, particlePositionIOBufID, particlePositionIOBuf);
-        SPHComputeShader.SetBuffer(kernelID, particleVelocityInputBufID, particleVelocityInputBuf);
-        SPHComputeShader.SetBuffer(kernelID, particleAccelIOBufID, particleAccelIOBuf);
+
+        // Integration uses position, velocity, and acceleration as inputs, and outputs new position and velocity
+        SPHComputeShader.SetBuffer(kernelID, dataInputBufID, particleDataInputBuffer);
+        //SPHComputeShader.SetBuffer(kernelID, velocityInputBufID, particleVelocityBuffer);
+        SPHComputeShader.SetBuffer(kernelID, accelerationInputBufID, particleAccelerationBuffer);
+
+        SPHComputeShader.SetBuffer(kernelID, dataOutputBufID, particleDataOutputBuffer);
 
         SPHComputeShader.SetFloat(deltaTimeID, Time.deltaTime);
         SPHComputeShader.Dispatch(kernelID, numThreadGroups, 1, 1);
@@ -203,12 +222,13 @@ public class Main : MonoBehaviour
         ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
         particleSystem.GetParticles(particles);
 
-        Vector3[] posArray = new Vector3[numParticles];
-        particlePositionIOBuf.GetData(posArray);
+        ParticleData[] dataArray = new ParticleData[numParticles];
+        particleDataOutputBuffer.GetData(dataArray);
 
         for (int i = 0; i < numParticles; i++)
         {
-            particles[i].position = posArray[i];
+            particles[i].position = dataArray[i].position;
+            particles[i].velocity = dataArray[i].velocity;
         }
         particleSystem.SetParticles(particles);
     }
