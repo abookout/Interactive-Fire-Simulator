@@ -7,7 +7,7 @@ public class Main : MonoBehaviour
 {
     // This should match with the SPH CS!
     const int ThreadGroupSize = 64;
-    const int MaxNumParticles = 256;
+    const int MaxNumParticles = 2048;
 
     // Buffer and parameter IDs
     static readonly int
@@ -94,16 +94,16 @@ public class Main : MonoBehaviour
 
     void InitializeBuffers()
     {
-        if (tex == null)
-        {
-            tex = new RenderTexture(numParticles, numParticles, 0, RenderTextureFormat.ARGBFloat);
-            tex.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
-            tex.volumeDepth = numParticles;
-            tex.enableRandomWrite = true;
-            tex.wrapMode = TextureWrapMode.Clamp;
-            tex.filterMode = FilterMode.Point;
-            tex.Create();
-        }
+        //if (tex == null)
+        //{
+        //    tex = new RenderTexture(numParticles, numParticles, 0, RenderTextureFormat.ARGBFloat);
+        //    tex.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
+        //    tex.volumeDepth = numParticles;
+        //    tex.enableRandomWrite = true;
+        //    tex.wrapMode = TextureWrapMode.Clamp;
+        //    tex.filterMode = FilterMode.Point;
+        //    tex.Create();
+        //}
 
         int sizeofVec3 = sizeof(float) * 3;
 
@@ -183,7 +183,7 @@ public class Main : MonoBehaviour
         //SPHComputeShader.SetBuffer(kernelID, velocityInputBufID, particleVelocityBuffer);
         SPHComputeShader.SetBuffer(kernelID, accelerationOutputBufID, particleAccelerationBuffer);
         // Set debug property because it blows up if you don't
-        SPHComputeShader.SetTexture(kernelID, Shader.PropertyToID("Result"), tex);
+        //SPHComputeShader.SetTexture(kernelID, Shader.PropertyToID("Result"), tex);
 
         SPHComputeShader.SetInt(numParticlesID, numParticles);
         SPHComputeShader.SetFloat(particleMassID, particleMass);
@@ -192,9 +192,8 @@ public class Main : MonoBehaviour
         SPHComputeShader.SetVector(extAccelerationsID, externalAccelerations);
 
 
-        // Squared num particles because of the size of the test texture
         //  Make sure there's at least one thread group!
-        int numThreadGroups = Mathf.Max(1, numParticles * numParticles * numParticles / ThreadGroupSize);
+        int numThreadGroups = Mathf.Max(1, MaxNumParticles / ThreadGroupSize);
 
         if (numThreadGroups > 65535)
         {
