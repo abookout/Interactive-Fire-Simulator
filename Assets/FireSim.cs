@@ -253,7 +253,7 @@ public class Main : MonoBehaviour
     }
 
     // Compute particle acceleration and populate position and velocity buffers
-    //  Inputs: position, velocity, PG, VL, _ExternalAccelerations, _DeltaTime
+    //  Inputs: position, velocity, PG, VL, _ExternalAccelerations, _ParticleMass, _DeltaTime
     //
     //  Outputs: new position and velocity
     void DispatchPosAndVel()
@@ -264,6 +264,7 @@ public class Main : MonoBehaviour
         SPHComputeShader.SetBuffer(id, "PG", PGBuf);
         SPHComputeShader.SetBuffer(id, "VL", VLBuf);
         SPHComputeShader.SetVector(extAccelerationsID, externalAccelerations);
+        SPHComputeShader.SetFloat(particleMassID, particleMass);
         //TODO: timestep!! Should be constant for CFL??? (or have cfl adjust per frame?)
         //  But for physics simulation, should be constant! Or else it's dependent on framerate
         SPHComputeShader.SetFloat(deltaTimeID, 0.001f);

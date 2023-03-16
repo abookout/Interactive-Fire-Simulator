@@ -229,7 +229,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   particleSystem: {fileID: 2054306561}
-  numParticles: 256
+  numParticles: 1024
   particleMass: 100
   viscosity: 15.8
   pressureStiffness: 10

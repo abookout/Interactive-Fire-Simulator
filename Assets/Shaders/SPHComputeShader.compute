@@ -179,6 +179,9 @@ void ComputeDensity(uint3 id : SV_DispatchThreadID)
 	// Loop through all (TODO: nearby) particles to calculate this particle's density
 	for (int i = 0; i < _NumParticles; i++)
 	{
+		if ((uint) i == id.x)
+			continue;
+		
 		ParticleData otherData = _DataInputBuffer[i];
 		float3 otherPos = otherData.position;
 		float dist = distance(thisPos, otherPos);
@@ -207,6 +210,9 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	[loop]
 	for (int i = 0; i < _NumParticles; i++)
 	{
+		if ((uint) i == id.x)
+			continue;
+		
 		// Pressure gradient
 		ParticleData otherData = _DataInputBuffer[i];
 		float otherDensity = D[i];
@@ -344,14 +350,15 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	float3 thisPG = PG[id.x];
 	float3 thisVL = VL[id.x];
 	
-	float3 thisAccel = -thisPG + thisVL + _ExternalAccelerations;
+	float3 forcesOnThis = -thisPG + thisVL + _ExternalAccelerations;
 	
 	// Use symplectic euler to update position and velocity
 	ParticleData oldData = _DataInputBuffer[id.x];
 	float3 oldPos = oldData.position;
 	float3 oldVel = oldData.velocity;
 	
-	float3 newVel = oldVel + thisAccel * _DeltaTime;
+	// Symplectic euler with a = F/m
+	float3 newVel = oldVel + _DeltaTime * forcesOnThis / _ParticleMass;
 	float3 newPos = oldPos + newVel * _DeltaTime;
 
 	ParticleData data;
