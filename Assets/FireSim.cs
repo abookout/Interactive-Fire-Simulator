@@ -11,16 +11,17 @@ public class Main : MonoBehaviour
 
     // Buffer and parameter IDs
     static readonly int
+    // Buffers
         dataInputBufID = Shader.PropertyToID("_DataInputBuffer"),
-        accelerationInputBufID = Shader.PropertyToID("_AccelerationInputBuffer"),
 
         dataOutputBufID = Shader.PropertyToID("_DataOutputBuffer"),
-        accelerationOutputBufID = Shader.PropertyToID("_AccelerationOutputBuffer"),
 
+        // Parameters
         deltaTimeID = Shader.PropertyToID("_DeltaTime"),
         numParticlesID = Shader.PropertyToID("_NumParticles"),
         particleMassID = Shader.PropertyToID("_ParticleMass"),
         pressureStiffnessID = Shader.PropertyToID("_PressureStiffness"),
+        viscosityID = Shader.PropertyToID("_Viscosity"),
         referenceDensityID = Shader.PropertyToID("_ReferenceDensity"),
         extAccelerationsID = Shader.PropertyToID("_ExternalAccelerations");
 
@@ -28,13 +29,17 @@ public class Main : MonoBehaviour
     [SerializeField] new ParticleSystem particleSystem;
     [SerializeField, Range(1, MaxNumParticles)] int numParticles = 32;
     [SerializeField] float particleMass = 0.1f;
+    [SerializeField] float viscosity = 15.8f;        // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
     [SerializeField] float pressureStiffness = 1f;
     [SerializeField] float referenceDensity = 1f;      // Probably choose atmostpheric pressure
     [SerializeField] Vector3 externalAccelerations = new(0, -9.8f, 0);      // Just gravity, for now at least
 
-    // Main compute shader for calulating update to particle accelerations
     [Header("Buffer & shader object properties")]
+    // Main compute shader for calulating update to particles
     [SerializeField] ComputeShader SPHComputeShader;
+
+    //  Make sure there's at least one thread group! TODO: just use NumParticles instead?
+    int numThreadGroups = Mathf.Max(1, MaxNumParticles / ThreadGroupSize);
 
     // For testing
     [SerializeField] RenderTexture tex;
@@ -46,12 +51,16 @@ public class Main : MonoBehaviour
     }
     const int sizeofParticleData = sizeof(float) * 3 * 2;
 
-    // Particle positions and current velocities are given to the acceleration compute shader as an input.
-    //  Position is then set by the ComputePosition kernel by integration.
+    // Particle positions and current velocities are given to the CS kernels as an input.
+    //  At the end, position and velocity are set by the ComputePosAndVel kernel by integration.
     [SerializeField] ComputeBuffer particleDataInputBuffer;
-    [SerializeField] ComputeBuffer particleDataOutputBuffer;
+    // Buffers for interim calculations
+    [SerializeField] ComputeBuffer DBuf;
+    [SerializeField] ComputeBuffer PGBuf;
+    [SerializeField] ComputeBuffer VLBuf;
     // Buffer for the calculation results
-    [SerializeField] ComputeBuffer particleAccelerationBuffer;
+    [SerializeField] ComputeBuffer particleDataOutputBuffer;
+
 
     // Using OnEnable instead of start or awake so that the buffers are refreshed every hot reload
     private void OnEnable()
@@ -112,7 +121,10 @@ public class Main : MonoBehaviour
         // Allocate the maximum amount of particles so that we don't need to keep creating new buffers when the number of particles changes
         particleDataInputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
         particleDataOutputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
-        particleAccelerationBuffer = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+
+        DBuf = new ComputeBuffer(MaxNumParticles, sizeof(float));
+        PGBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+        VLBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
 
         // Initialize buffers, using unity's particle system emission shape to choose random initial positions in a box
         //var psShape = particleSystem.shape;
@@ -121,26 +133,44 @@ public class Main : MonoBehaviour
         particleSystem.GetParticles(particles);
 
         ParticleData[] dataArr = new ParticleData[MaxNumParticles];
-        Vector3[] accArr = new Vector3[MaxNumParticles];
+        Vector3[] vec3Arr = new Vector3[MaxNumParticles];
+        float[] floatArr = new float[MaxNumParticles];
         for (int i = 0; i < MaxNumParticles; i++)
         {
             if (i < numParticles)
+            {
+                Vector3 pos = particles[i].position;
+                if (float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z))
+                {
+                    throw new System.Exception("Found a NaN! index " + i);
+                }
                 dataArr[i].position = particles[i].position;
+            }
             else
+            {
                 dataArr[i].position = Vector3.zero;
+            }
+
             dataArr[i].velocity = Vector3.zero;
-            accArr[i] = Vector3.zero;
+            vec3Arr[i] = Vector3.zero;
+            floatArr[i] = 0f;
         }
+
         particleDataInputBuffer.SetData(dataArr);
         particleDataOutputBuffer.SetData(dataArr);       // Initialize output with the same data as input
-        particleAccelerationBuffer.SetData(accArr);
+        // Initialize buffer contents to all zeros
+        DBuf.SetData(floatArr);
+        PGBuf.SetData(vec3Arr);
+        VLBuf.SetData(vec3Arr);
     }
 
     void ReleaseBuffers()
     {
         particleDataInputBuffer.Release();
         particleDataOutputBuffer.Release();
-        particleAccelerationBuffer.Release();
+        DBuf.Release();
+        PGBuf.Release();
+        VLBuf.Release();
     }
 
     // Write current particle positions and velocities for acceleration CS
@@ -173,51 +203,93 @@ public class Main : MonoBehaviour
         //particlePositionBuffer.EndWrite<Vector3>(numParticles);
     }
 
+    // Compute density
+    //  Inputs: position buffer, _NumParticles, _ParticleMass.
+    //  Outputs: density buffer
+    void DispatchDensity()
+    {
+        int id = SPHComputeShader.FindKernel("ComputeDensity");
+        // input
+        SPHComputeShader.SetBuffer(id, dataInputBufID, particleDataInputBuffer);
+        SPHComputeShader.SetInt(numParticlesID, numParticles);
+        SPHComputeShader.SetFloat(particleMassID, particleMass);
+
+        // output
+        SPHComputeShader.SetBuffer(id, "D", DBuf);
+
+        SPHComputeShader.Dispatch(id, numThreadGroups, 1, 1);
+    }
+
+    // Compute pressure gradient and velocity laplacian. Doing both together because
+    //  their calculations are independent of each other. Includes calculation for pressure
+    //
+    // PG:
+    //  Inputs: particle position (for kernel grad.), pressure, density,
+    //      _PressureStiffness, _ReferenceDensity, _NumParticles, _ParticleMass
+    //  Outputs: PG buf
+    //
+    // VL:
+    //  Inputs: particle position (for kernel lapl.), velocity, density, _Viscosity, _NumParticles, _ParticleMass
+    //  Outputs: VL buf
+    void DispatchPGandVL()
+    {
+        int id = SPHComputeShader.FindKernel("ComputePGandVL");
+        // input - common
+        SPHComputeShader.SetBuffer(id, dataInputBufID, particleDataInputBuffer);
+        SPHComputeShader.SetBuffer(id, "D", DBuf);
+        SPHComputeShader.SetInt(numParticlesID, numParticles);
+        SPHComputeShader.SetFloat(particleMassID, particleMass);
+        // input for PG
+        SPHComputeShader.SetFloat(pressureStiffnessID, pressureStiffness);
+        SPHComputeShader.SetFloat(referenceDensityID, referenceDensity);
+        // input for VL
+        SPHComputeShader.SetFloat(viscosityID, viscosity);
+
+        // output
+        SPHComputeShader.SetBuffer(id, "PG", PGBuf);
+        SPHComputeShader.SetBuffer(id, "VL", VLBuf);
+
+        SPHComputeShader.Dispatch(id, numThreadGroups, 1, 1);
+    }
+
+    // Compute particle acceleration and populate position and velocity buffers
+    //  Inputs: position, velocity, PG, VL, _ExternalAccelerations, _DeltaTime
+    //
+    //  Outputs: new position and velocity
+    void DispatchPosAndVel()
+    {
+        int id = SPHComputeShader.FindKernel("ComputePosAndVel");
+        // input
+        SPHComputeShader.SetBuffer(id, dataInputBufID, particleDataInputBuffer);
+        SPHComputeShader.SetBuffer(id, "PG", PGBuf);
+        SPHComputeShader.SetBuffer(id, "VL", VLBuf);
+        SPHComputeShader.SetVector(extAccelerationsID, externalAccelerations);
+        //TODO: timestep!! Should be constant for CFL??? (or have cfl adjust per frame?)
+        //  But for physics simulation, should be constant! Or else it's dependent on framerate
+        SPHComputeShader.SetFloat(deltaTimeID, 0.001f);
+
+        // output
+        SPHComputeShader.SetBuffer(id, dataOutputBufID, particleDataOutputBuffer);
+
+        SPHComputeShader.Dispatch(id, numThreadGroups, 1, 1);
+    }
+
     // Dispatch a job to the GPU to run a new SPH simulation step
     void SimulateParticles()
     {
-        int kernelID = SPHComputeShader.FindKernel("ComputeAcceleration");
-
-        // Acceleration computation uses position and velocity as inputs, and accel as output
-        SPHComputeShader.SetBuffer(kernelID, dataInputBufID, particleDataInputBuffer);
-        //SPHComputeShader.SetBuffer(kernelID, velocityInputBufID, particleVelocityBuffer);
-        SPHComputeShader.SetBuffer(kernelID, accelerationOutputBufID, particleAccelerationBuffer);
-        // Set debug property because it blows up if you don't
-        //SPHComputeShader.SetTexture(kernelID, Shader.PropertyToID("Result"), tex);
-
-        SPHComputeShader.SetInt(numParticlesID, numParticles);
-        SPHComputeShader.SetFloat(particleMassID, particleMass);
-        SPHComputeShader.SetFloat(pressureStiffnessID, pressureStiffness);
-        SPHComputeShader.SetFloat(referenceDensityID, referenceDensity);
-        SPHComputeShader.SetVector(extAccelerationsID, externalAccelerations);
-
-
-        //  Make sure there's at least one thread group!
-        int numThreadGroups = Mathf.Max(1, MaxNumParticles / ThreadGroupSize);
-
         if (numThreadGroups > 65535)
         {
             Debug.LogWarning("Number of thread groups (" + numThreadGroups + ") would exceed the maximum of 65535.");
             numThreadGroups = 65535;
         }
 
-        SPHComputeShader.Dispatch(kernelID, numThreadGroups, 1, 1);
+        // Order of calculation pipeline: density, pressure, pressure gradient and velocity laplacian (independent), 
+        //  then finally acceleration, position and velocity.
+        DispatchDensity();
+        DispatchPGandVL();
+        DispatchPosAndVel();
 
-
-        // Dispatch the position computation CS
-        kernelID = SPHComputeShader.FindKernel("ComputePosition");
-
-        // Integration uses position, velocity, and acceleration as inputs, and outputs new position and velocity
-        SPHComputeShader.SetBuffer(kernelID, dataInputBufID, particleDataInputBuffer);
-        //SPHComputeShader.SetBuffer(kernelID, velocityInputBufID, particleVelocityBuffer);
-        SPHComputeShader.SetBuffer(kernelID, accelerationInputBufID, particleAccelerationBuffer);
-
-        SPHComputeShader.SetBuffer(kernelID, dataOutputBufID, particleDataOutputBuffer);
-
-        SPHComputeShader.SetFloat(deltaTimeID, Time.deltaTime);
-        SPHComputeShader.Dispatch(kernelID, numThreadGroups, 1, 1);
-
-        // Positions buffer is now updated, set particle positions.
+        //// Position & velocity buffer is now updated, so set particles from that.
         ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
         particleSystem.GetParticles(particles);
 

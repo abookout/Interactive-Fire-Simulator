@@ -229,10 +229,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   particleSystem: {fileID: 2054306561}
-  numParticles: 2048
-  particleMass: 10
-  pressureStiffness: 0.1
-  referenceDensity: 0.1
+  numParticles: 256
+  particleMass: 100
+  viscosity: 15.8
+  pressureStiffness: 10
+  referenceDensity: 1.2
   externalAccelerations: {x: 0, y: 0, z: 0}
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
   tex: {fileID: 0}
