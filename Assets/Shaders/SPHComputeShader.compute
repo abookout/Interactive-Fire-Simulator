@@ -9,7 +9,7 @@
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
 
-#define MaxNumParticles 2048
+#define MaxNumParticles 16384
 
 #define PI 3.14159265
 // The kernel's finite support. Note that the support radius is 2*KernelSupport (goes exactly to 0 at +- radius).
@@ -179,8 +179,8 @@ void ComputeDensity(uint3 id : SV_DispatchThreadID)
 	// Loop through all (TODO: nearby) particles to calculate this particle's density
 	for (int i = 0; i < _NumParticles; i++)
 	{
-		if ((uint) i == id.x)
-			continue;
+		//if ((uint) i == id.x)
+		//	continue;
 		
 		ParticleData otherData = _DataInputBuffer[i];
 		float3 otherPos = otherData.position;
@@ -210,8 +210,8 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	[loop]
 	for (int i = 0; i < _NumParticles; i++)
 	{
-		if ((uint) i == id.x)
-			continue;
+		//if ((uint) i == id.x)
+		//	continue;
 		
 		// Pressure gradient
 		ParticleData otherData = _DataInputBuffer[i];
@@ -220,6 +220,15 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		
 		float3 dist = thisPos - otherData.position;
 		float3 kernelGrad = KernelGradient(dist);
+		
+		//TODO: trying to solve problem of zero density when outside range of influence of other particles
+		//if (length(kernelGrad) <= 0.0001)
+		//{
+			// They should actually be 0 because KernelGradient explicitly returns 0
+			// Add no contribution from this particle (it's not nearby). This isn't an optimization, it's a way to avoid undefined calculations (0 density on denom)
+
+		//	  continue;
+		//}
 		
 		//TODO: problem!!!! Density can be 0!!!!! Because the kernel can be 0!???
 		float thisInvDensity = 1 / thisDensity;

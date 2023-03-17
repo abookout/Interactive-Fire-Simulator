@@ -7,7 +7,7 @@ public class Main : MonoBehaviour
 {
     // This should match with the SPH CS!
     const int ThreadGroupSize = 64;
-    const int MaxNumParticles = 2048;
+    const int MaxNumParticles = 16384;
 
     // Buffer and parameter IDs
     static readonly int
@@ -27,19 +27,21 @@ public class Main : MonoBehaviour
 
     [Header("Set in inspector")]
     [SerializeField] new ParticleSystem particleSystem;
-    [SerializeField, Range(1, MaxNumParticles)] int numParticles = 32;
-    [SerializeField] float particleMass = 0.1f;
-    [SerializeField] float viscosity = 15.8f;        // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
+    [SerializeField, Range(1, MaxNumParticles)] int numParticles = 256;
+    [SerializeField] float particleMass = 0.1f;         // Make it larger to slow down the simulation
+    [SerializeField] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
     [SerializeField] float pressureStiffness = 1f;
-    [SerializeField] float referenceDensity = 1f;      // Probably choose atmostpheric pressure
+    [SerializeField] float referenceDensity = 1.8f;       // Probably choose based on atmostpheric pressure
     [SerializeField] Vector3 externalAccelerations = new(0, -9.8f, 0);      // Just gravity, for now at least
+
+    [SerializeField] float spawnVolumeWidth = 2f;
 
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
     [SerializeField] ComputeShader SPHComputeShader;
 
-    //  Make sure there's at least one thread group! TODO: just use NumParticles instead?
-    int numThreadGroups = Mathf.Max(1, MaxNumParticles / ThreadGroupSize);
+    //  Make sure there's at least one thread group!
+    int numThreadGroups;
 
     // For testing
     [SerializeField] RenderTexture tex;
@@ -89,7 +91,12 @@ public class Main : MonoBehaviour
             } 
             else
             {
-                // particleSystem.particleCount < numParticles, so emit the difference
+                // particleCount < numParticles, so emit the difference
+
+                // Update volume size before spawning new particles in case it changed
+                var psShape = particleSystem.shape;
+                psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
+
                 particleSystem.Emit(numParticles - particleSystem.particleCount);
             }
         }
@@ -99,6 +106,12 @@ public class Main : MonoBehaviour
 
         // Perform SPH calculations
         SimulateParticles();
+    }
+
+    private void OnDrawGizmos()
+    {
+        Gizmos.color = Color.blue;
+        Gizmos.DrawWireCube(particleSystem.transform.position, new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth));
     }
 
     void InitializeBuffers()
@@ -128,6 +141,12 @@ public class Main : MonoBehaviour
 
         // Initialize buffers, using unity's particle system emission shape to choose random initial positions in a box
         //var psShape = particleSystem.shape;
+        var psMain = particleSystem.main;
+        psMain.maxParticles = MaxNumParticles;
+
+        var psShape = particleSystem.shape;
+        psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
+
         particleSystem.Emit(numParticles);
         ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
         particleSystem.GetParticles(particles);
@@ -203,6 +222,44 @@ public class Main : MonoBehaviour
         //particlePositionBuffer.EndWrite<Vector3>(numParticles);
     }
 
+    int RoundToNearest(float num, int nearest)
+    {
+        return Mathf.CeilToInt(num / nearest) * nearest;
+    }
+
+    // Dispatch a job to the GPU to run a new SPH simulation step
+    void SimulateParticles()
+    {
+        // Pick a number of thread groups that divides numParticles into groups of size ThreadGroupSize
+        numThreadGroups = Mathf.Max(1, Mathf.CeilToInt(numParticles / (float)ThreadGroupSize));
+
+        if (numThreadGroups > 65535)
+        {
+            Debug.LogWarning("Number of thread groups (" + numThreadGroups + ") would exceed the maximum of 65535.");
+            numThreadGroups = 65535;
+        }
+
+        // Order of calculation pipeline: density, pressure, pressure gradient and velocity laplacian (independent), 
+        //  then finally acceleration, position and velocity.
+        DispatchDensity();
+        DispatchPGandVL();
+        DispatchPosAndVel();
+
+        //// Position & velocity buffer is now updated, so set particles from that.
+        ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
+        particleSystem.GetParticles(particles);
+
+        ParticleData[] dataArray = new ParticleData[numParticles];
+        particleDataOutputBuffer.GetData(dataArray);
+
+        for (int i = 0; i < numParticles; i++)
+        {
+            particles[i].position = dataArray[i].position;
+            particles[i].velocity = dataArray[i].velocity;
+        }
+        particleSystem.SetParticles(particles);
+    }
+
     // Compute density
     //  Inputs: position buffer, _NumParticles, _ParticleMass.
     //  Outputs: density buffer
@@ -273,36 +330,6 @@ public class Main : MonoBehaviour
         SPHComputeShader.SetBuffer(id, dataOutputBufID, particleDataOutputBuffer);
 
         SPHComputeShader.Dispatch(id, numThreadGroups, 1, 1);
-    }
-
-    // Dispatch a job to the GPU to run a new SPH simulation step
-    void SimulateParticles()
-    {
-        if (numThreadGroups > 65535)
-        {
-            Debug.LogWarning("Number of thread groups (" + numThreadGroups + ") would exceed the maximum of 65535.");
-            numThreadGroups = 65535;
-        }
-
-        // Order of calculation pipeline: density, pressure, pressure gradient and velocity laplacian (independent), 
-        //  then finally acceleration, position and velocity.
-        DispatchDensity();
-        DispatchPGandVL();
-        DispatchPosAndVel();
-
-        //// Position & velocity buffer is now updated, so set particles from that.
-        ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
-        particleSystem.GetParticles(particles);
-
-        ParticleData[] dataArray = new ParticleData[numParticles];
-        particleDataOutputBuffer.GetData(dataArray);
-
-        for (int i = 0; i < numParticles; i++)
-        {
-            particles[i].position = dataArray[i].position;
-            particles[i].velocity = dataArray[i].velocity;
-        }
-        particleSystem.SetParticles(particles);
     }
 }
 

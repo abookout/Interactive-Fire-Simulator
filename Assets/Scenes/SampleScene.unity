@@ -208,8 +208,8 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalRotation: {x: 0.16042995, y: -0.37686962, z: 0.06645226, w: 0.9098438}
+  m_LocalPosition: {x: 11.126, y: 7.996, z: -13.8787}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -229,12 +229,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   particleSystem: {fileID: 2054306561}
-  numParticles: 1024
-  particleMass: 100
-  viscosity: 15.8
+  numParticles: 1865
+  particleMass: 10
+  viscosity: 12
   pressureStiffness: 10
-  referenceDensity: 1.2
+  referenceDensity: 1.8
   externalAccelerations: {x: 0, y: 0, z: 0}
+  spawnVolumeWidth: 10
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
   tex: {fileID: 0}
 --- !u!1 &410087039
@@ -992,7 +993,7 @@ ParticleSystem:
         m_RotationOrder: 4
     randomizeRotationDirection: 0
     gravitySource: 0
-    maxNumParticles: 1000
+    maxNumParticles: 10000000
     customEmitterVelocity: {x: 0, y: 0, z: 0}
     size3D: 0
     rotation3D: 0
