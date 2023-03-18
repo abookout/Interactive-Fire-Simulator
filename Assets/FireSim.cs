@@ -27,6 +27,7 @@ public class Main : MonoBehaviour
 
     [Header("Set in inspector")]
     [SerializeField] new ParticleSystem particleSystem;
+    [SerializeField] bool triggerRespawnParticles;             // Used like a button
     [SerializeField, Range(1, MaxNumParticles)] int numParticles = 256;
     [SerializeField] float particleMass = 0.1f;         // Make it larger to slow down the simulation
     [SerializeField] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
@@ -35,6 +36,9 @@ public class Main : MonoBehaviour
     [SerializeField] Vector3 externalAccelerations = new(0, -9.8f, 0);      // Just gravity, for now at least
 
     [SerializeField] float spawnVolumeWidth = 2f;
+    [SerializeField] bool usePeriodicBoundary = true;
+    [SerializeField] Bounds particleBounds;
+
 
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
@@ -77,6 +81,12 @@ public class Main : MonoBehaviour
     }
     private void Update()
     {
+        if (triggerRespawnParticles)
+        {
+            particleSystem.Clear();
+            triggerRespawnParticles = false;
+        }
+
         // Make sure the number of particles hasn't changed
         if (particleSystem.particleCount != numParticles)
         {
@@ -88,11 +98,10 @@ public class Main : MonoBehaviour
                 particleSystem.GetParticles(particles);
                 // Only set numParticles
                 particleSystem.SetParticles(particles, numParticles);
-            } 
+            }
             else
             {
-                // particleCount < numParticles, so emit the difference
-
+                // particleCount < numParticles, so emit the difference.
                 // Update volume size before spawning new particles in case it changed
                 var psShape = particleSystem.shape;
                 psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
@@ -100,18 +109,32 @@ public class Main : MonoBehaviour
                 particleSystem.Emit(numParticles - particleSystem.particleCount);
             }
         }
-        
+
         // Send positions and velocities to GPU
         WriteParticleDataToGPU();
 
         // Perform SPH calculations
         SimulateParticles();
+
+        ParticleSystem.Particle[] ps = new ParticleSystem.Particle[1];
+        float[] d = new float[1];
+        Vector3[] pg = new Vector3[1];
+        Vector3[] vl = new Vector3[1];
+        particleSystem.GetParticles(ps);
+        DBuf.GetData(d);
+        PGBuf.GetData(pg);
+        VLBuf.GetData(vl);
+
+        Debug.Log("Particle 0:\n\tPosition: " + ps[0].position + "\tVelocity: " + ps[0].velocity + "\tDensity: " + d[0] + "\n\tPressure Gradient: " + pg[0] + "\t\tDiffusion: " + vl[0]);
     }
 
     private void OnDrawGizmos()
     {
-        Gizmos.color = Color.blue;
+        Gizmos.color = Color.yellow;
         Gizmos.DrawWireCube(particleSystem.transform.position, new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth));
+
+        Gizmos.color = Color.blue;
+        Gizmos.DrawWireCube(particleSystem.transform.position, particleBounds.extents * 2);
     }
 
     void InitializeBuffers()
@@ -254,8 +277,47 @@ public class Main : MonoBehaviour
 
         for (int i = 0; i < numParticles; i++)
         {
-            particles[i].position = dataArray[i].position;
-            particles[i].velocity = dataArray[i].velocity;
+            Vector3 newPosition = dataArray[i].position;
+            Vector3 newVelocity = dataArray[i].velocity;
+
+            // Periodic boundary condition
+
+            if (usePeriodicBoundary && !particleBounds.Contains(newPosition))
+            {
+                // Check if outside bounds on each of the sides
+                Vector3 posOffsets = particleBounds.center + particleBounds.extents;
+                Vector3 negOffsets = particleBounds.center - particleBounds.extents;
+                if (newPosition.x > posOffsets.x)
+                    newPosition.x -= particleBounds.size.x;
+                
+                else if (newPosition.x < negOffsets.x)
+                    newPosition.x += particleBounds.size.x;
+                
+                else if (newPosition.y > posOffsets.y)
+                    newPosition.y -= particleBounds.size.y;
+                
+                else if (newPosition.y < negOffsets.y)
+                    newPosition.y += particleBounds.size.y;
+                
+                else if (newPosition.z > posOffsets.z)
+                    newPosition.z -= particleBounds.size.z;
+                
+                else if (newPosition.z < negOffsets.z)
+                    newPosition.z += particleBounds.size.z;
+
+                //newPosition = particleBounds.ClosestPoint(newPosition);
+
+                // Find the closest position on the bounds and stick the particle on the OPPOSITE side of the boundary (with the same velocity)
+                //Vector3 closestPointOnBounds = particleBounds.ClosestPoint(newPosition);
+
+                // Difference between new position and the closest point on the boundary surface; this vector shows the direction the particle
+                //  will be moved 
+                //Vector3 dir = newPosition - closestPointOnBounds;
+            }
+
+            // Update particle's position and velocity from the gpu data
+            particles[i].position = newPosition;
+            particles[i].velocity = newVelocity;
         }
         particleSystem.SetParticles(particles);
     }

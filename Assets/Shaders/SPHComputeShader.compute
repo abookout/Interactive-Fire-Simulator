@@ -20,10 +20,12 @@
 //TODO: pay attention to timestep!!! Should be defined by unity?
 #define Timestep 0.001f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
 
-#define ParticleDiameter 0.5f
+// Just for CFL condition? 
+#define ParticleDiameter 0.02f
+
 // CFL condition (from Ihmsen 2014): timestep <= 0.4 * particle_diameter / max_speed.
 // The CFL condition says that the max speed is <= some factor (0.4) times the particle diameter per timestep.
-#define MaxParticleSpeed 0.5f /* <-- if 1, equals max speed. Can be less */* 0.4f * ParticleDiameter / Timestep
+#define MaxParticleSpeed 1.0f /* <-- if 1, equals max speed. Can be less */* 0.4f * ParticleDiameter / Timestep
 
 //	https://docs.unity3d.com/Manual/SL-PlatformDifferences.html "Using buffers with GPU buffers"
 
@@ -38,7 +40,7 @@ struct ParticleData
 //RWTexture3D<float4> Result;
 
 float3 _ExternalAccelerations;
-float _DeltaTime;
+float _DeltaTime;				//TODO: using Timestep for now!!
 int _NumParticles;
 half _ParticleMass;
 half _Viscosity;
@@ -118,17 +120,45 @@ float KernelSecondDerivative(float r)
 
 float3 KernelGradient(float3 r)
 {
+	// METHOD 1: The one that is probably right
 	float x = KernelDerivative(r.x);
 	float y = KernelDerivative(r.y);
 	float z = KernelDerivative(r.z);
 	return float3(x, y, z);
+	
+	// METHOD 2: The one that I thought should be right
+	/*
+	float rLen = length(r);
+	// Make sure no divide by zero if it's far away
+	if (rLen * rLen < 1.0e-10)
+	{
+		return float3(0, 0, 0);
+	}
+	else
+	{
+		float3 dir = normalize(r);
+		float mag = KernelDerivative(rLen);
+		return mag * saturate(dir);
+	}*/
+
+	///// NaNs :(
+	//float3 dir = float3(1, 0, 0); //saturate(normalize(r) + float3(.1, 1, .1));
+	//float mag = KernelDerivative(1);
+	//return float3(0.5, 0, 0); //mag * dir;
+
 }
 float3 KernelLaplacian(float3 r)
 {
+	// METHOD 1: The one that is probably right
 	float x = KernelSecondDerivative(r.x);
 	float y = KernelSecondDerivative(r.y);
 	float z = KernelSecondDerivative(r.z);
 	return float3(x, y, z);
+	
+	// METHOD 2: The one that I thought should be right
+	//float3 dir = normalize(r);
+	//float mag = KernelSecondDerivative(length(r));
+	//return mag * dir;
 }
 
 // For testing - writing to output texture2d or 3d
@@ -367,13 +397,13 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	float3 oldVel = oldData.velocity;
 	
 	// Symplectic euler with a = F/m
-	float3 newVel = oldVel + _DeltaTime * forcesOnThis / _ParticleMass;
-	float3 newPos = oldPos + newVel * _DeltaTime;
+	float3 newVel = oldVel + Timestep * forcesOnThis / _ParticleMass;
+	float3 newPos = oldPos + newVel * Timestep;
 
 	ParticleData data;
 	data.position = newPos;
-	//data.velocity = speedLimit(newVel);
-	data.velocity = newVel;
+	data.velocity = speedLimit(newVel);
+	//data.velocity = newVel;
 	
 	_DataOutputBuffer[id.x] = data;
 }
