@@ -25,6 +25,9 @@ public class Main : MonoBehaviour
         referenceDensityID = Shader.PropertyToID("_ReferenceDensity"),
         extAccelerationsID = Shader.PropertyToID("_ExternalAccelerations");
 
+    // Array is saved over updates so it doesn't need keep being allocated
+    ParticleSystem.Particle[] particlesArr;
+
     [Header("Set in inspector")]
     [SerializeField] new ParticleSystem particleSystem;
     [SerializeField] bool triggerRespawnParticles;             // Used like a button
@@ -32,7 +35,7 @@ public class Main : MonoBehaviour
     [SerializeField] float particleMass = 0.1f;         // Make it larger to slow down the simulation
     [SerializeField] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
     [SerializeField] float pressureStiffness = 1f;
-    [SerializeField] float referenceDensity = 1.8f;       // Probably choose based on atmostpheric pressure
+    [SerializeField] float referenceDensity = 1.18f;                        // Density of air is 1.18 kg/m^3
     [SerializeField] Vector3 externalAccelerations = new(0, -9.8f, 0);      // Just gravity, for now at least
 
     [SerializeField] float spawnVolumeWidth = 2f;
@@ -68,22 +71,38 @@ public class Main : MonoBehaviour
     [SerializeField] ComputeBuffer particleDataOutputBuffer;
 
 
+    private void OnDrawGizmos()
+    {
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireCube(particleSystem.transform.position, new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth));
+
+        Gizmos.color = Color.blue;
+        Gizmos.DrawWireCube(particleSystem.transform.position, particleBounds.extents * 2);
+    }
+
     // Using OnEnable instead of start or awake so that the buffers are refreshed every hot reload
     private void OnEnable()
     {
         Unity.Collections.LowLevel.Unsafe.UnsafeUtility.SetLeakDetectionMode(NativeLeakDetectionMode.EnabledWithStackTrace);
 
-        InitializeBuffers();
+        Initialize();
     }
     private void OnDisable()
     {
         ReleaseBuffers();
     }
+    
     private void Update()
     {
         if (triggerRespawnParticles)
         {
-            particleSystem.Clear();
+            //particleSystem.Clear();
+            //triggerRespawnParticles = false;
+
+            particlesArr = new ParticleSystem.Particle[numParticles];
+            particleSystem.GetParticles(particlesArr);
+            EvenlySpaceParticles(particlesArr);
+            particleSystem.SetParticles(particlesArr, numParticles);
             triggerRespawnParticles = false;
         }
 
@@ -93,11 +112,9 @@ public class Main : MonoBehaviour
             // It has changed, so need to either destroy some or instantiate more
             if (particleSystem.particleCount > numParticles)
             {
-                // Destroy some particles to bring it back down to numParticles
-                ParticleSystem.Particle[] particles = new ParticleSystem.Particle[MaxNumParticles];
-                particleSystem.GetParticles(particles);
-                // Only set numParticles
-                particleSystem.SetParticles(particles, numParticles);
+                // Only set numParticles back into the array (which is less than before)
+                particleSystem.GetParticles(particlesArr);
+                particleSystem.SetParticles(particlesArr, numParticles);
             }
             else
             {
@@ -106,6 +123,7 @@ public class Main : MonoBehaviour
                 var psShape = particleSystem.shape;
                 psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
 
+                //TODO: it makes a big difference where these are spawned in terms of the pressure gradient!
                 particleSystem.Emit(numParticles - particleSystem.particleCount);
             }
         }
@@ -128,16 +146,8 @@ public class Main : MonoBehaviour
         Debug.Log("Particle 0:\n\tPosition: " + ps[0].position + "\tVelocity: " + ps[0].velocity + "\tDensity: " + d[0] + "\n\tPressure Gradient: " + pg[0] + "\t\tDiffusion: " + vl[0]);
     }
 
-    private void OnDrawGizmos()
-    {
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireCube(particleSystem.transform.position, new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth));
-
-        Gizmos.color = Color.blue;
-        Gizmos.DrawWireCube(particleSystem.transform.position, particleBounds.extents * 2);
-    }
-
-    void InitializeBuffers()
+    // Initialize particle system and buffers for GPU
+    void Initialize()
     {
         //if (tex == null)
         //{
@@ -170,9 +180,17 @@ public class Main : MonoBehaviour
         var psShape = particleSystem.shape;
         psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
 
+        // Spawn in the initial particles
+        particlesArr = new ParticleSystem.Particle[numParticles];
+
         particleSystem.Emit(numParticles);
-        ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
-        particleSystem.GetParticles(particles);
+        particleSystem.GetParticles(particlesArr);
+
+        // Evenly space them
+
+        //TODO: why does this make velocity NaN????????????????????????????????????????????????????????????????????????????????????
+        EvenlySpaceParticles(particlesArr);
+        particleSystem.SetParticles(particlesArr);
 
         ParticleData[] dataArr = new ParticleData[MaxNumParticles];
         Vector3[] vec3Arr = new Vector3[MaxNumParticles];
@@ -181,12 +199,12 @@ public class Main : MonoBehaviour
         {
             if (i < numParticles)
             {
-                Vector3 pos = particles[i].position;
+                Vector3 pos = particlesArr[i].position;
                 if (float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z))
                 {
                     throw new System.Exception("Found a NaN! index " + i);
                 }
-                dataArr[i].position = particles[i].position;
+                dataArr[i].position = particlesArr[i].position;
             }
             else
             {
@@ -218,16 +236,15 @@ public class Main : MonoBehaviour
     // Write current particle positions and velocities for acceleration CS
     void WriteParticleDataToGPU()
     {
-        ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
-        particleSystem.GetParticles(particles);
+        particleSystem.GetParticles(particlesArr);
 
         //TODO: maintain position and velocity arrays so don't need to access from particle system? Not sure if this is a problem
         ParticleData[] dataArray = new ParticleData[numParticles];
 
         for (int i = 0; i < numParticles; i++)
         {
-            dataArray[i].position = particles[i].position;
-            dataArray[i].velocity = particles[i].velocity;
+            dataArray[i].position = particlesArr[i].position;
+            dataArray[i].velocity = particlesArr[i].velocity;
         }
 
         particleDataInputBuffer.SetData(dataArray);
@@ -243,6 +260,53 @@ public class Main : MonoBehaviour
         //}
         //particleVelocityBuffer.EndWrite<Vector3>(numParticles);
         //particlePositionBuffer.EndWrite<Vector3>(numParticles);
+    }
+
+    // For initial spawn, create particles evenly spaced in the spawn volume
+    //TODO: for now, assume numParticles has an integer cube root!!!!!!!! 512, 729, 1000, ..., 4096, ...
+    void EvenlySpaceParticles(ParticleSystem.Particle[] particles)
+    {
+        float particleSpacingFloat = Mathf.Pow(numParticles, 1.0f / 3.0f);
+        int particleSpacing = Mathf.RoundToInt(particleSpacingFloat);
+
+        if (particleSpacing * particleSpacing * particleSpacing != numParticles)
+        {
+            throw new System.Exception("numParticles does not have an integer cube root! Can't do this yet " + numParticles);
+        }
+
+        int i = 0;
+        for (int y = 0; y < particleSpacing; y++)
+        {
+            for (int x = 0; x < particleSpacing; x++)
+            {
+                for (int z = 0; z < particleSpacing; z++)
+                {
+                    // Distribute particles evenly, where the first and last are on the edge boundaries of the spawn volume
+                    Vector3 pos = new Vector3(x, y, z);
+                    ParticleSystem.Particle p = particles[i];
+
+                    // Change the position's range from 0..(particleSpacing-1) to 0..spawnVolumeWidth but offset to center the volume
+                    p.position = MapRange(pos, 0, particleSpacing-1, -spawnVolumeWidth/2, spawnVolumeWidth/2);
+                    particles[i] = p;
+                    i++;
+                }
+            }
+        }
+    }
+
+    float MapRange(float val, float from1, float to1, float from2, float to2)
+    {
+        return (val - from1) / (to1 - from1) * (to2 - from2) + from2;
+    }
+
+    // MapRange of each of val's x, y, and z
+    Vector3 MapRange(Vector3 val, float from1, float to1, float from2, float to2)
+    {
+        return new Vector3(
+            MapRange(val.x, from1, to1, from2, to2),
+            MapRange(val.y, from1, to1, from2, to2),
+            MapRange(val.z, from1, to1, from2, to2)
+            );
     }
 
     int RoundToNearest(float num, int nearest)
@@ -268,10 +332,10 @@ public class Main : MonoBehaviour
         DispatchPGandVL();
         DispatchPosAndVel();
 
-        //// Position & velocity buffer is now updated, so set particles from that.
         ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
         particleSystem.GetParticles(particles);
 
+        //// Position & velocity buffer is now updated, so set particles from that.
         ParticleData[] dataArray = new ParticleData[numParticles];
         particleDataOutputBuffer.GetData(dataArray);
 
@@ -289,19 +353,19 @@ public class Main : MonoBehaviour
                 Vector3 negOffsets = particleBounds.center - particleBounds.extents;
                 if (newPosition.x > posOffsets.x)
                     newPosition.x -= particleBounds.size.x;
-                
+
                 else if (newPosition.x < negOffsets.x)
                     newPosition.x += particleBounds.size.x;
-                
+
                 else if (newPosition.y > posOffsets.y)
                     newPosition.y -= particleBounds.size.y;
-                
+
                 else if (newPosition.y < negOffsets.y)
                     newPosition.y += particleBounds.size.y;
-                
+
                 else if (newPosition.z > posOffsets.z)
                     newPosition.z -= particleBounds.size.z;
-                
+
                 else if (newPosition.z < negOffsets.z)
                     newPosition.z += particleBounds.size.z;
 

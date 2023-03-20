@@ -118,6 +118,18 @@ float KernelSecondDerivative(float r)
 		return piFactor * mad(1.5, -rOverS, 3); // (3/2)*(2 - rOverS) = 3 - 1.5*rOverS
 }
 
+/*
+
+TODO: I THINK the vector-valued gradient functions are implemented wrong!!!! They're the reason that particles have the strange axial behaviour
+	of snapping to axes, and ****spreading out only in the positive direction (+x,+y,+z)**** !!!!!!
+
+In the method of calculating the kernels of each of the individual x,y,z, the resulting values will always be positive?? (this is true for the regular
+	kernel, but what about its gradient and derivative??)
+
+If this is true, the kernel gradient should always result in positive values!!! Making the pressure gradient always positive (negated in accel eqn)
+
+*/
+
 float3 KernelGradient(float3 r)
 {
 	// METHOD 1: The one that is probably right
