@@ -160,11 +160,11 @@ MonoBehaviour:
   pressureStiffness: 10
   referenceDensity: 1.8
   externalAccelerations: {x: 0, y: 0, z: 0}
-  spawnVolumeWidth: 19.5
+  spawnVolumeWidth: 9
   usePeriodicBoundary: 1
   particleBounds:
     m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 10, y: 10, z: 10}
+    m_Extent: {x: 5, y: 5, z: 5}
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
   tex: {fileID: 0}
 --- !u!4 &299583915

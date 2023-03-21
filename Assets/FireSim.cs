@@ -42,7 +42,6 @@ public class Main : MonoBehaviour
     [SerializeField] bool usePeriodicBoundary = true;
     [SerializeField] Bounds particleBounds;
 
-
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
     [SerializeField] ComputeShader SPHComputeShader;
@@ -91,19 +90,20 @@ public class Main : MonoBehaviour
     {
         ReleaseBuffers();
     }
-    
+
+    bool isFirstUpdate = true;
     private void Update()
     {
         if (triggerRespawnParticles)
         {
-            //particleSystem.Clear();
-            //triggerRespawnParticles = false;
-
-            particlesArr = new ParticleSystem.Particle[numParticles];
-            particleSystem.GetParticles(particlesArr);
-            EvenlySpaceParticles(particlesArr);
-            particleSystem.SetParticles(particlesArr, numParticles);
+            particleSystem.Clear();
             triggerRespawnParticles = false;
+
+            //particlesArr = new ParticleSystem.Particle[numParticles];
+            //particleSystem.GetParticles(particlesArr);
+            //EvenlySpaceParticles(particlesArr);
+            //particleSystem.SetParticles(particlesArr, numParticles);
+            //triggerRespawnParticles = false;
         }
 
         // Make sure the number of particles hasn't changed
@@ -126,6 +126,13 @@ public class Main : MonoBehaviour
                 //TODO: it makes a big difference where these are spawned in terms of the pressure gradient!
                 particleSystem.Emit(numParticles - particleSystem.particleCount);
             }
+        }
+
+        if (isFirstUpdate)
+        {
+            // Just for making gpu debugging nicer
+            isFirstUpdate = false;
+            return;
         }
 
         // Send positions and velocities to GPU
@@ -189,8 +196,9 @@ public class Main : MonoBehaviour
         // Evenly space them
 
         //TODO: why does this make velocity NaN????????????????????????????????????????????????????????????????????????????????????
-        EvenlySpaceParticles(particlesArr);
-        particleSystem.SetParticles(particlesArr);
+        // Does it? It works if the simulation fn is commented
+        //EvenlySpaceParticles(particlesArr);
+        //particleSystem.SetParticles(particlesArr);
 
         ParticleData[] dataArr = new ParticleData[MaxNumParticles];
         Vector3[] vec3Arr = new Vector3[MaxNumParticles];
@@ -343,6 +351,18 @@ public class Main : MonoBehaviour
         {
             Vector3 newPosition = dataArray[i].position;
             Vector3 newVelocity = dataArray[i].velocity;
+
+            ////// Testing: if particle got NaN'd, fix it so it's easier to find the problem
+            if (float.IsNaN(newPosition.magnitude))
+            {
+                Debug.Log("Particle " + i + " had NaN position " + newPosition);
+                newPosition = Vector3.zero;
+            }
+            if (float.IsNaN(newVelocity.magnitude))
+            {
+                Debug.Log("Particle " + i + " had NaN velocity " + newVelocity);
+                newVelocity = Vector3.zero;
+            }
 
             // Periodic boundary condition
 

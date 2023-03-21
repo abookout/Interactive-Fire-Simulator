@@ -8,20 +8,20 @@
 
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
-
 #define MaxNumParticles 16384
 
 #define PI 3.14159265
+#define FLOAT_EPSILON 1.0e-10
 // The kernel's finite support. Note that the support radius is 2*KernelSupport (goes exactly to 0 at +- radius).
 // 0.5 gives the kernel as shown in the diagram in textbook p 289
 #define KernelSupport 0.5
 #define sInv (1 / KernelSupport)
 
 //TODO: pay attention to timestep!!! Should be defined by unity?
-#define Timestep 0.001f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
+#define Timestep 0.02f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Just for CFL condition? 
-#define ParticleDiameter 0.02f
+#define ParticleDiameter 0.001f
 
 // CFL condition (from Ihmsen 2014): timestep <= 0.4 * particle_diameter / max_speed.
 // The CFL condition says that the max speed is <= some factor (0.4) times the particle diameter per timestep.
@@ -130,47 +130,53 @@ If this is true, the kernel gradient should always result in positive values!!! 
 
 */
 
+// Don't pass in a zero-vector at risk of NaN! (at length(r) )
 float3 KernelGradient(float3 r)
 {
 	// METHOD 1: The one that is probably right
+	/*
 	float x = KernelDerivative(r.x);
 	float y = KernelDerivative(r.y);
 	float z = KernelDerivative(r.z);
 	return float3(x, y, z);
+	*/
 	
 	// METHOD 2: The one that I thought should be right
-	/*
-	float rLen = length(r);
-	// Make sure no divide by zero if it's far away
-	if (rLen * rLen < 1.0e-10)
-	{
-		return float3(0, 0, 0);
-	}
-	else
-	{
-		float3 dir = normalize(r);
-		float mag = KernelDerivative(rLen);
-		return mag * saturate(dir);
-	}*/
-
-	///// NaNs :(
-	//float3 dir = float3(1, 0, 0); //saturate(normalize(r) + float3(.1, 1, .1));
-	//float mag = KernelDerivative(1);
-	//return float3(0.5, 0, 0); //mag * dir;
-
+	
+	float rLen = max(0, length(r));
+	float3 dir = saturate(normalize(r));
+	
+	float mag = KernelDerivative(rLen);
+	return mag * dir;
 }
 float3 KernelLaplacian(float3 r)
 {
 	// METHOD 1: The one that is probably right
+	
 	float x = KernelSecondDerivative(r.x);
 	float y = KernelSecondDerivative(r.y);
 	float z = KernelSecondDerivative(r.z);
 	return float3(x, y, z);
 	
+	
+	/*
 	// METHOD 2: The one that I thought should be right
-	//float3 dir = normalize(r);
-	//float mag = KernelSecondDerivative(length(r));
-	//return mag * dir;
+	float rLen = length(r);
+	float3 dir;
+	if (rLen <FLOAT_EPSILON)
+	{
+		// Prevent normalize causing divide by zero
+		rLen = 0;
+		dir = float3(0, 0, 0);
+	}
+	else
+	{
+		dir = normalize(r);
+	}
+	
+	float mag = KernelSecondDerivative(rLen);
+	return mag * dir;
+	*/
 }
 
 // For testing - writing to output texture2d or 3d
@@ -221,12 +227,24 @@ void ComputeDensity(uint3 id : SV_DispatchThreadID)
 	// Loop through all (TODO: nearby) particles to calculate this particle's density
 	for (int i = 0; i < _NumParticles; i++)
 	{
-		//if ((uint) i == id.x)
-		//	continue;
+		if ((uint) i == id.x)
+		{
+			// Particle i is the particle represented by thisData
+			continue;
+		}
 		
 		ParticleData otherData = _DataInputBuffer[i];
 		float3 otherPos = otherData.position;
-		float dist = distance(thisPos, otherPos);
+
+		// distance can potentially be negative because of floating point precision (then kernel should be 0)
+		float dist = max(0, distance(thisPos, otherPos));
+		
+		if (dist * sInv > 2.0f)
+		{
+			// The particle is far away enough to not matter for the density calculation (r/s > 2)
+			continue;
+		}
+		
 		float kernelVal = Kernel(dist);
 
 		// Formula for particle density
@@ -252,39 +270,42 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	[loop]
 	for (int i = 0; i < _NumParticles; i++)
 	{
-		//if ((uint) i == id.x)
-		//	continue;
+		if ((uint) i == id.x)
+		{
+			// Particle i is the particle represented by thisData
+			continue;
+		}
 		
-		// Pressure gradient
+		////// Pressure gradient
+		
 		ParticleData otherData = _DataInputBuffer[i];
 		float otherDensity = D[i];
 		float otherPressure = _PressureStiffness * (otherDensity - _ReferenceDensity);
 		
-		float3 dist = thisPos - otherData.position;
-		float3 kernelGrad = KernelGradient(dist);
+		float3 posDifference = thisPos - otherData.position;
+		float dist = max(0, length(posDifference));
 		
-		//TODO: trying to solve problem of zero density when outside range of influence of other particles
-		//if (length(kernelGrad) <= 0.0001)
-		//{
-			// They should actually be 0 because KernelGradient explicitly returns 0
-			// Add no contribution from this particle (it's not nearby). This isn't an optimization, it's a way to avoid undefined calculations (0 density on denom)
-
-		//	  continue;
-		//}
+		if (dist * sInv > 2.0f)
+		{
+			// The particle is far away enough to not matter for the calculation (r/s > 2)
+			continue;
+		}
+		
+		float3 kernelGrad = KernelGradient(posDifference);
 		
 		//TODO: problem!!!! Density can be 0!!!!! Because the kernel can be 0!???
 		float thisInvDensity = 1 / thisDensity;
 		float otherInvDensity = 1 / otherDensity;
 		
 		float thisPressureOverSquaredDensity = thisPressure * thisInvDensity * thisInvDensity;
-
 		float otherPressureOverSquaredDensity = otherPressure * otherInvDensity * otherInvDensity;
 
 		// Formula for pressure gradient 
 		resultingPG += (thisPressureOverSquaredDensity + otherPressureOverSquaredDensity) * kernelGrad;
 
-		// Laplacian
-		float3 kernelLap = KernelLaplacian(dist);
+		////// Diffusion
+		
+		float3 kernelLap = KernelLaplacian(posDifference);
 		float3 otherVel = otherData.velocity;
 		
 		// Formula for velocity laplacian
@@ -379,15 +400,18 @@ void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_Grou
 
 // Clamp given float3 to have length at most MaxParticleSpeed
 //TODO: this doesn't seem to work as expected yet
-float3 speedLimit(float3 v)
+float3 SpeedLimit(float3 v)
 {
-	float mag = length(v);
-	//float3 norm = v / mag;
-	float3 norm = normalize(v);
-	// Clamp between 0 and max speed
-	float newMag = saturate(mag) * MaxParticleSpeed;
-	
-	return newMag * norm;
+	float mag = max(0, length(v));
+	// For some reason there's an issue sometimes with intermittent returns
+	float3 result = float3(0, 0, 0);
+	if (mag > FLOAT_EPSILON) // Prevent normalize divide by zero
+	{
+		float3 norm = saturate(normalize(v));
+		float newMag = min(mag, MaxParticleSpeed);
+		result = newMag * norm;
+	}
+	return result;
 }
 
 [numthreads(ThreadGroupSize, 1, 1)]
@@ -414,7 +438,7 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 
 	ParticleData data;
 	data.position = newPos;
-	data.velocity = speedLimit(newVel);
+	data.velocity = SpeedLimit(newVel);
 	//data.velocity = newVel;
 	
 	_DataOutputBuffer[id.x] = data;
