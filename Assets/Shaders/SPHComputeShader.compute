@@ -152,31 +152,18 @@ float3 KernelGradient(float3 r)
 float3 KernelLaplacian(float3 r)
 {
 	// METHOD 1: The one that is probably right
-	
+	/*
 	float x = KernelSecondDerivative(r.x);
 	float y = KernelSecondDerivative(r.y);
 	float z = KernelSecondDerivative(r.z);
 	return float3(x, y, z);
+	*/
 	
-	
-	/*
-	// METHOD 2: The one that I thought should be right
-	float rLen = length(r);
-	float3 dir;
-	if (rLen <FLOAT_EPSILON)
-	{
-		// Prevent normalize causing divide by zero
-		rLen = 0;
-		dir = float3(0, 0, 0);
-	}
-	else
-	{
-		dir = normalize(r);
-	}
+	float rLen = max(0, length(r));
+	float3 dir = saturate(normalize(r));
 	
 	float mag = KernelSecondDerivative(rLen);
 	return mag * dir;
-	*/
 }
 
 // For testing - writing to output texture2d or 3d

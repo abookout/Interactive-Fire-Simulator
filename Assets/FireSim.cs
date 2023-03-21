@@ -7,7 +7,7 @@ public class Main : MonoBehaviour
 {
     // This should match with the SPH CS!
     const int ThreadGroupSize = 64;
-    const int MaxNumParticles = 16384;
+    const int MaxNumParticles = 4096;
 
     // Buffer and parameter IDs
     static readonly int
@@ -79,6 +79,7 @@ public class Main : MonoBehaviour
         Gizmos.DrawWireCube(particleSystem.transform.position, particleBounds.extents * 2);
     }
 
+
     // Using OnEnable instead of start or awake so that the buffers are refreshed every hot reload
     private void OnEnable()
     {
@@ -91,9 +92,27 @@ public class Main : MonoBehaviour
         ReleaseBuffers();
     }
 
+
+    readonly float fpsDrawInterval = 0.5f;
+    int fpsLastVal = -1;
+    float fpsLastDrawTime = 0;
+    private void OnGUI()
+    {
+        GUIStyle style = new GUIStyle();
+        style.fontSize = 20;
+        style.normal.textColor = Color.white;
+        GUI.TextField(new Rect(5, 5, 20, 100), "FPS " + fpsLastVal, style);
+    }
+
     bool isFirstUpdate = true;
     private void Update()
     {
+        if (Time.time > fpsLastDrawTime + fpsDrawInterval)
+        {
+            fpsLastVal = (int)(1 / Time.smoothDeltaTime);
+            fpsLastDrawTime = Time.time;
+        }
+
         if (triggerRespawnParticles)
         {
             particleSystem.Clear();
@@ -109,6 +128,7 @@ public class Main : MonoBehaviour
         // Make sure the number of particles hasn't changed
         if (particleSystem.particleCount != numParticles)
         {
+            particlesArr = new ParticleSystem.Particle[numParticles];
             // It has changed, so need to either destroy some or instantiate more
             if (particleSystem.particleCount > numParticles)
             {

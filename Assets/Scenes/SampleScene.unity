@@ -154,13 +154,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   particleSystem: {fileID: 2054306561}
   triggerRespawnParticles: 0
-  numParticles: 4096
-  particleMass: 10
+  numParticles: 1024
+  particleMass: 1
   viscosity: 12
   pressureStiffness: 10
-  referenceDensity: 1.8
+  referenceDensity: 1.18
   externalAccelerations: {x: 0, y: 0, z: 0}
-  spawnVolumeWidth: 9
+  spawnVolumeWidth: 6.72
   usePeriodicBoundary: 1
   particleBounds:
     m_Center: {x: 0, y: 0, z: 0}
@@ -266,14 +266,14 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_LocalRotation: {x: 0.16042995, y: -0.37686962, z: 0.06645226, w: 0.9098438}
-  m_LocalPosition: {x: 11.126, y: 7.996, z: -13.8787}
+  m_LocalRotation: {x: 0.10212373, y: 0.76140386, z: -0.12379789, w: 0.62809956}
+  m_LocalPosition: {x: -14.27, y: 3.84, z: 1.79}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 18.47, y: 100.96, z: 0}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
