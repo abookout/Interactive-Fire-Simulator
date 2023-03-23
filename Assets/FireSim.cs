@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
 
-public class Main : MonoBehaviour
+public class FireSim : MonoBehaviour
 {
     // This should match with the SPH CS!
     const int ThreadGroupSize = 64;
@@ -30,7 +30,6 @@ public class Main : MonoBehaviour
 
     [Header("Set in inspector")]
     [SerializeField] new ParticleSystem particleSystem;
-    [SerializeField] bool triggerRespawnParticles;             // Used like a button
     [SerializeField, Range(1, MaxNumParticles)] int numParticles = 256;
     [SerializeField] float particleMass = 0.1f;         // Make it larger to slow down the simulation
     [SerializeField] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
@@ -69,6 +68,16 @@ public class Main : MonoBehaviour
     // Buffer for the calculation results
     [SerializeField] ComputeBuffer particleDataOutputBuffer;
 
+    public void RespawnParticles()
+    {
+        // Clearing the particles will cause the system to create new particles at the beginning of the next update loop
+        particleSystem.Clear();
+
+        //particlesArr = new ParticleSystem.Particle[numParticles];
+        //particleSystem.GetParticles(particlesArr);
+        //EvenlySpaceParticles(particlesArr);
+        //particleSystem.SetParticles(particlesArr, numParticles);
+    }
 
     private void OnDrawGizmos()
     {
@@ -111,18 +120,6 @@ public class Main : MonoBehaviour
         {
             fpsLastVal = (int)(1 / Time.smoothDeltaTime);
             fpsLastDrawTime = Time.time;
-        }
-
-        if (triggerRespawnParticles)
-        {
-            particleSystem.Clear();
-            triggerRespawnParticles = false;
-
-            //particlesArr = new ParticleSystem.Particle[numParticles];
-            //particleSystem.GetParticles(particlesArr);
-            //EvenlySpaceParticles(particlesArr);
-            //particleSystem.SetParticles(particlesArr, numParticles);
-            //triggerRespawnParticles = false;
         }
 
         // Make sure the number of particles hasn't changed
@@ -314,7 +311,7 @@ public class Main : MonoBehaviour
                     ParticleSystem.Particle p = particles[i];
 
                     // Change the position's range from 0..(particleSpacing-1) to 0..spawnVolumeWidth but offset to center the volume
-                    p.position = MapRange(pos, 0, particleSpacing-1, -spawnVolumeWidth/2, spawnVolumeWidth/2);
+                    p.position = MapRange(pos, 0, particleSpacing - 1, -spawnVolumeWidth / 2, spawnVolumeWidth / 2);
                     particles[i] = p;
                     i++;
                 }

@@ -156,7 +156,7 @@ MonoBehaviour:
   triggerRespawnParticles: 0
   numParticles: 1024
   particleMass: 1
-  viscosity: 12
+  viscosity: 6
   pressureStiffness: 10
   referenceDensity: 1.18
   externalAccelerations: {x: 0, y: 0, z: 0}
