@@ -121,6 +121,11 @@ float3 KernelGradient(float3 r)
 	//	to ensure that the gradient is in exactly the right direction and has exactly the correct magnitude (because it is just based on distance!)
 	float rLen = max(0, length(r));
 	float3 dir = normalize(r);
+	if (any(isnan(dir)))
+	{
+		// ask for forgiveness, not permission
+		dir = float3(0, 0, 0);
+	}
 	
 	float mag = KernelDerivative(rLen);
 	return mag * dir;
@@ -129,6 +134,10 @@ float3 KernelLaplacian(float3 r)
 {
 	float rLen = max(0, length(r));
 	float3 dir = normalize(r);
+	if (any(isnan(dir)))
+	{
+		dir = float3(0, 0, 0);
+	}
 	
 	float mag = KernelSecondDerivative(rLen);
 	return mag * dir;

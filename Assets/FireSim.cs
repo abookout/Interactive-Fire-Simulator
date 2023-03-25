@@ -478,7 +478,7 @@ public class FireSim : MonoBehaviour
             Vector3 newPosition = dataArray[i].position;
             Vector3 newVelocity = dataArray[i].velocity;
 
-            ////// Testing: if particle got NaN'd, fix it so it's easier to find the problem
+            ////// TODO: Testing: if particle got NaN'd, fix it so it's easier to find the problem
             if (float.IsNaN(newPosition.magnitude))
             {
                 Debug.Log("Particle " + i + " had NaN position " + newPosition);
@@ -491,13 +491,12 @@ public class FireSim : MonoBehaviour
             }
 
             // Periodic boundary condition
-
             if (usePeriodicBoundary && !particleBounds.Contains(newPosition))
             {
                 // Extra distance to move particle inside cube to make sure it doesn't wrap again right away.
                 //  Experimentally found 0.15 to be about the smallest stable distance
-
                 float insideOffset = 0.15f;       
+
                 // Check if outside bounds on each of the sides
                 Vector3 posOffsets = particleBounds.center + particleBounds.extents;
                 Vector3 negOffsets = particleBounds.center - particleBounds.extents;
