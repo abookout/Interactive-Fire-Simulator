@@ -35,11 +35,13 @@ public class FireSim : MonoBehaviour
     [SerializeField] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
     [SerializeField] float pressureStiffness = 1f;
     [SerializeField] float referenceDensity = 1.18f;                        // Density of air is 1.18 kg/m^3
-    [SerializeField] Vector3 externalAccelerations = new(0, -9.8f, 0);      // Just gravity, for now at least
+    [SerializeField] Vector3 externalAccelerations = new(0, 0, 0);
 
     [SerializeField] float spawnVolumeWidth = 2f;
     [SerializeField] bool usePeriodicBoundary = true;
     [SerializeField] Bounds particleBounds;
+
+    [SerializeField] bool spawnEvenlySpaced = true;
 
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
@@ -47,9 +49,6 @@ public class FireSim : MonoBehaviour
 
     //  Make sure there's at least one thread group!
     int numThreadGroups;
-
-    // For testing
-    [SerializeField] RenderTexture tex;
 
     struct ParticleData
     {
@@ -70,13 +69,14 @@ public class FireSim : MonoBehaviour
 
     public void RespawnParticles()
     {
-        // Clearing the particles will cause the system to create new particles at the beginning of the next update loop
+        // Clear and repopulate particles
         particleSystem.Clear();
+        UpdateParticleCount();
 
-        //particlesArr = new ParticleSystem.Particle[numParticles];
-        //particleSystem.GetParticles(particlesArr);
-        //EvenlySpaceParticles(particlesArr);
-        //particleSystem.SetParticles(particlesArr, numParticles);
+        if (spawnEvenlySpaced)
+        {
+            EvenlySpaceParticles();
+        }
     }
 
     private void OnDrawGizmos()
@@ -92,7 +92,7 @@ public class FireSim : MonoBehaviour
     // Using OnEnable instead of start or awake so that the buffers are refreshed every hot reload
     private void OnEnable()
     {
-        Unity.Collections.LowLevel.Unsafe.UnsafeUtility.SetLeakDetectionMode(NativeLeakDetectionMode.EnabledWithStackTrace);
+        //Unity.Collections.LowLevel.Unsafe.UnsafeUtility.SetLeakDetectionMode(NativeLeakDetectionMode.EnabledWithStackTrace);
 
         Initialize();
     }
@@ -113,6 +113,28 @@ public class FireSim : MonoBehaviour
         GUI.TextField(new Rect(5, 5, 20, 100), "FPS " + fpsLastVal, style);
     }
 
+    void UpdateParticleCount()
+    {
+        particlesArr = new ParticleSystem.Particle[numParticles];
+        // It has changed, so need to either destroy some or instantiate more
+        if (particleSystem.particleCount > numParticles)
+        {
+            // Only set numParticles back into the array (which is less than before)
+            particleSystem.GetParticles(particlesArr);
+            particleSystem.SetParticles(particlesArr, numParticles);
+        }
+        else
+        {
+            // particleCount < numParticles, so emit the difference.
+            // Update volume size before spawning new particles in case it changed
+            var psShape = particleSystem.shape;
+            psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
+
+            //TODO: it makes a big difference where these are spawned in terms of the pressure gradient!
+            particleSystem.Emit(numParticles - particleSystem.particleCount);
+        }
+    }
+
     bool isFirstUpdate = true;
     private void Update()
     {
@@ -125,29 +147,12 @@ public class FireSim : MonoBehaviour
         // Make sure the number of particles hasn't changed
         if (particleSystem.particleCount != numParticles)
         {
-            particlesArr = new ParticleSystem.Particle[numParticles];
-            // It has changed, so need to either destroy some or instantiate more
-            if (particleSystem.particleCount > numParticles)
-            {
-                // Only set numParticles back into the array (which is less than before)
-                particleSystem.GetParticles(particlesArr);
-                particleSystem.SetParticles(particlesArr, numParticles);
-            }
-            else
-            {
-                // particleCount < numParticles, so emit the difference.
-                // Update volume size before spawning new particles in case it changed
-                var psShape = particleSystem.shape;
-                psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
-
-                //TODO: it makes a big difference where these are spawned in terms of the pressure gradient!
-                particleSystem.Emit(numParticles - particleSystem.particleCount);
-            }
+            UpdateParticleCount();
         }
 
         if (isFirstUpdate)
         {
-            // Just for making gpu debugging nicer
+            // Skip update on first frame just for making gpu debugging nicer (it's hard to capture the first frame in RenderDoc)
             isFirstUpdate = false;
             return;
         }
@@ -158,6 +163,7 @@ public class FireSim : MonoBehaviour
         // Perform SPH calculations
         SimulateParticles();
 
+        // TODO: This stuff is just for testing
         ParticleSystem.Particle[] ps = new ParticleSystem.Particle[1];
         float[] d = new float[1];
         Vector3[] pg = new Vector3[1];
@@ -173,17 +179,6 @@ public class FireSim : MonoBehaviour
     // Initialize particle system and buffers for GPU
     void Initialize()
     {
-        //if (tex == null)
-        //{
-        //    tex = new RenderTexture(numParticles, numParticles, 0, RenderTextureFormat.ARGBFloat);
-        //    tex.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
-        //    tex.volumeDepth = numParticles;
-        //    tex.enableRandomWrite = true;
-        //    tex.wrapMode = TextureWrapMode.Clamp;
-        //    tex.filterMode = FilterMode.Point;
-        //    tex.Create();
-        //}
-
         int sizeofVec3 = sizeof(float) * 3;
 
         // note: SubUpdates prevents RenderDoc from viewing the buffer contents
@@ -211,11 +206,10 @@ public class FireSim : MonoBehaviour
         particleSystem.GetParticles(particlesArr);
 
         // Evenly space them
-
-        //TODO: why does this make velocity NaN????????????????????????????????????????????????????????????????????????????????????
-        // Does it? It works if the simulation fn is commented
-        //EvenlySpaceParticles(particlesArr);
-        //particleSystem.SetParticles(particlesArr);
+        if (spawnEvenlySpaced)
+        {
+            EvenlySpaceParticles();
+        }
 
         ParticleData[] dataArr = new ParticleData[MaxNumParticles];
         Vector3[] vec3Arr = new Vector3[MaxNumParticles];
@@ -288,16 +282,17 @@ public class FireSim : MonoBehaviour
     }
 
     // For initial spawn, create particles evenly spaced in the spawn volume
-    //TODO: for now, assume numParticles has an integer cube root!!!!!!!! 512, 729, 1000, ..., 4096, ...
-    void EvenlySpaceParticles(ParticleSystem.Particle[] particles)
+    void EvenlySpaceParticles()
     {
-        float particleSpacingFloat = Mathf.Pow(numParticles, 1.0f / 3.0f);
-        int particleSpacing = Mathf.RoundToInt(particleSpacingFloat);
+        // Make sure the array is populated with the correct particle data
+        particlesArr = new ParticleSystem.Particle[numParticles];
+        particleSystem.GetParticles(particlesArr);
 
-        if (particleSpacing * particleSpacing * particleSpacing != numParticles)
-        {
-            throw new System.Exception("numParticles does not have an integer cube root! Can't do this yet " + numParticles);
-        }
+        // If numParticles doesn't have an exact cube root, find its next largest perfect cube and use that for spacing instead
+        //  so that we can fit all the particles on the lattice (even though there will be some empty space)
+        float particleSpacingFloat = Mathf.Pow(numParticles, 1.0f / 3.0f);
+        // Using ceilToInt will make sure that the spacing has a perfect cube root
+        int particleSpacing = Mathf.CeilToInt(particleSpacingFloat);
 
         int i = 0;
         for (int y = 0; y < particleSpacing; y++)
@@ -308,15 +303,22 @@ public class FireSim : MonoBehaviour
                 {
                     // Distribute particles evenly, where the first and last are on the edge boundaries of the spawn volume
                     Vector3 pos = new Vector3(x, y, z);
-                    ParticleSystem.Particle p = particles[i];
+                    ParticleSystem.Particle p = particlesArr[i];
 
                     // Change the position's range from 0..(particleSpacing-1) to 0..spawnVolumeWidth but offset to center the volume
                     p.position = MapRange(pos, 0, particleSpacing - 1, -spawnVolumeWidth / 2, spawnVolumeWidth / 2);
-                    particles[i] = p;
+                    particlesArr[i] = p;
                     i++;
+
+                    // Hacky way of breaking out of the nested loop - this is the case when numParticles is not a perfect cube root
+                    if (i >= numParticles) break;
                 }
+                if (i >= numParticles) break;
             }
+            if (i >= numParticles) break;
         }
+
+        particleSystem.SetParticles(particlesArr, numParticles);
     }
 
     float MapRange(float val, float from1, float to1, float from2, float to2)

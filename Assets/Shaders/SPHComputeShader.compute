@@ -8,7 +8,7 @@
 
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
-#define MaxNumParticles 16384
+//#define MaxNumParticles 16384
 
 #define PI 3.14159265
 #define FLOAT_EPSILON 1.0e-10
@@ -35,10 +35,6 @@ struct ParticleData
 	float3 velocity;
 };
 
-// For debugging. Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
-//RWTexture3D<float4> Result;
-
 float3 _ExternalAccelerations;
 float _DeltaTime;				//TODO: using Timestep for now!!
 int _NumParticles;
@@ -52,7 +48,7 @@ half _ReferenceDensity;
 StructuredBuffer<ParticleData> _DataInputBuffer : register(t1);
 StructuredBuffer<float3> _AccelerationInputBuffer : register(t2);
 
-RWStructuredBuffer<ParticleData> _DataOutputBuffer: register(u1);
+RWStructuredBuffer<ParticleData> _DataOutputBuffer : register(u1);
 RWStructuredBuffer<float3> _AccelerationOutputBuffer : register(u2);
 
 // Data buffers for interim calculations
@@ -118,31 +114,11 @@ float KernelSecondDerivative(float r)
 		return piFactor * mad(1.5, -rOverS, 3); // (3/2)*(2 - rOverS) = 3 - 1.5*rOverS
 }
 
-/*
-
-TODO: I THINK the vector-valued gradient functions are implemented wrong!!!! They're the reason that particles have the strange axial behaviour
-	of snapping to axes, and ****spreading out only in the positive direction (+x,+y,+z)**** !!!!!!
-
-In the method of calculating the kernels of each of the individual x,y,z, the resulting values will always be positive?? (this is true for the regular
-	kernel, but what about its gradient and derivative??)
-
-If this is true, the kernel gradient should always result in positive values!!! Making the pressure gradient always positive (negated in accel eqn)
-
-*/
-
 // Don't pass in a zero-vector at risk of NaN! (at length(r) )
 float3 KernelGradient(float3 r)
 {
-	// METHOD 1: The one that is probably right
-	/*
-	float x = KernelDerivative(r.x);
-	float y = KernelDerivative(r.y);
-	float z = KernelDerivative(r.z);
-	return float3(x, y, z);
-	*/
-	
-	// METHOD 2: The one that I thought should be right
-	
+	// To get the resulting vector, pass the magnitude of r to KernelDerivative and use the normalized r vector as the direction component
+	//	to ensure that the gradient is in exactly the right direction and has exactly the correct magnitude (because it is just based on distance!)
 	float rLen = max(0, length(r));
 	float3 dir = saturate(normalize(r));
 	
@@ -151,14 +127,6 @@ float3 KernelGradient(float3 r)
 }
 float3 KernelLaplacian(float3 r)
 {
-	// METHOD 1: The one that is probably right
-	/*
-	float x = KernelSecondDerivative(r.x);
-	float y = KernelSecondDerivative(r.y);
-	float z = KernelSecondDerivative(r.z);
-	return float3(x, y, z);
-	*/
-	
 	float rLen = max(0, length(r));
 	float3 dir = saturate(normalize(r));
 	
@@ -166,7 +134,7 @@ float3 KernelLaplacian(float3 r)
 	return mag * dir;
 }
 
-// For testing - writing to output texture2d or 3d
+/*
 uint2 flatTo2D(uint1 val, int w)
 {
 	return uint2(fmod(val, w), floor(val / w));
@@ -175,27 +143,7 @@ uint3 flatTo3D(uint1 val, int w, int h)
 {
 	return uint3(fmod(val, w), fmod(val / w, h), floor(val / (w * h)));
 }
-
-void TestOutput(uint3 id)
-{
-    //Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
-
-	// Gives a value between 0 and 2.5, normalize to 0 to 1
-	//float k = Kernel(distance(id.xy, uint2(128, 128)));
-	//Result[id.xy] = float4(k, k, k, 1);
-	
-	//Result[id.xy] = float4(k, k, k, 1);
-	
-	float w = MaxNumParticles;
-	//uint2 id2D = uint2(fmod(id.x, w), floor(id.x / w));
-	//Result[id2D.xy] = float4(id2D.x & id2D.y, (id2D.x & 15) / 15.0, (id2D.y & 15) / 15.0, 0.0) * _ParticleMass;
-	
-	uint3 id3D = flatTo3D(id.x, w, w);
-	//Result[id3D] = float4(1.0f, 0.0f, 0.0f, 1.0f);
-
-	//Result[id3D.xyz] = float4(id3D.x & id3D.y & id3D.z, (id3D.x & 15) / 15.0, (id3D.y & 15) / 15.0, 0.0) * _ParticleMass;
-}
-
+*/
 
 // numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. A multiple of 64 threads is a good number bc the thread warp size is either 32 or 64 depending on gpu.
 [numthreads(ThreadGroupSize, 1, 1)]
@@ -274,13 +222,13 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		
 		if (dist * sInv > 2.0f)
 		{
-			// The particle is far away enough to not matter for the calculation (r/s > 2)
+			// The particle is far away enough to not matter for the calculation (r/s > 2).
+			//	Prevents divide by zero in density calculations just below
 			continue;
 		}
 		
 		float3 kernelGrad = KernelGradient(posDifference);
 		
-		//TODO: problem!!!! Density can be 0!!!!! Because the kernel can be 0!???
 		float thisInvDensity = 1 / thisDensity;
 		float otherInvDensity = 1 / otherDensity;
 		
@@ -305,94 +253,13 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	VL[id.x] = _Viscosity * _ParticleMass * resultingVL;
 }
 
-/*
-[numthreads(ThreadGroupSize, 1, 1)]
-void ComputeAcceleration(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex, uint3 gid : SV_GroupID)
-{
-	// Position of this particle
-	ParticleData thisData = _DataInputBuffer[id.x];
-	float3 thisPos = thisData.position;
-	float3 thisVel = thisData.velocity;
-	
-	// Loop through all (TODO: nearby) particles to calculate this particle's density
-	int i = 0;
-	for (i = 0; i < _NumParticles; i++)
-	{
-		ParticleData otherData = _DataInputBuffer[i];
-		float3 otherPos = otherData.position;
-		float dist = distance(thisPos, otherPos);
-		float kernelVal = Kernel(dist);
-
-		//particleKernel[id.x] = kernelVal;
-		// Formula for particle density
-		D[id.x] = _ParticleMass * kernelVal;
-	}
-	
-	AllMemoryBarrierWithGroupSync();
-	
-	// Calculate pressure of all particles
-	float thisDensity = D[id.x];
-	[loop]
-	for (i = 0; i < _NumParticles; i++)
-	{
-		// Formula for particle pressure
-		float otherDensity = D[i];
-		P[id.x] = _PressureStiffness * (otherDensity - thisDensity);
-
-	}
-	AllMemoryBarrierWithGroupSync();
-	
-	float thisPressure = P[id.x];
-	 
-	// Calculate pressure gradients and the laplacians - these don't rely on each other so they can be done at the same time
-	[loop]
-	for (i = 0; i < _NumParticles; i++)
-	{
-		// Pressure gradient
-		ParticleData otherData = _DataInputBuffer[i];
-		float otherPressure = P[i];
-		float otherDensity = D[i];
-		
-		float3 dist = thisPos - otherData.position;
-		float3 kernelGrad = KernelGradient(dist);
-		
-		float thisInvDensity = 1 / thisDensity;
-		float otherInvDensity = 1 / otherDensity;
-		
-		float thisPressureOverSquaredDensity = thisPressure * thisInvDensity * thisInvDensity;
-
-		float otherPressureOverSquaredDensity = otherPressure * otherInvDensity * otherInvDensity;
-
-		// Formula for pressure gradient
-		PG[id.x] = _ParticleMass * (thisPressureOverSquaredDensity + otherPressureOverSquaredDensity) * kernelGrad;
-
-		// Laplacian
-		
-		float3 kernelLap = KernelLaplacian(dist);
-		float3 otherVel = otherData.velocity;
-		
-		// Formula for laplacian
-		VL[id.x] = _ParticleMass * (otherVel - thisVel) * thisInvDensity * kernelLap;
-	}
-	AllMemoryBarrierWithGroupSync();
-
-	// Finally, write to the output!
-	//TODO: viscosity coefficient
-	float3 thisPG = PG[id.x];
-	float3 thisVL = VL[id.x];
-	_AccelerationOutputBuffer[id.x] = -thisPG + thisVL + _ExternalAccelerations;
-	
-}
-*/
-
 // Clamp given float3 to have length at most MaxParticleSpeed
-//TODO: this doesn't seem to work as expected yet
 float3 SpeedLimit(float3 v)
 {
 	float mag = max(0, length(v));
-	// For some reason there's an issue sometimes with intermittent returns
+	// HLSL sometimes has an issue with intermittent returns, so use result variable instead
 	float3 result = float3(0, 0, 0);
-	if (mag > FLOAT_EPSILON) // Prevent normalize divide by zero
+	if (mag > FLOAT_EPSILON)	// Prevent normalize divide by zero
 	{
 		float3 norm = saturate(normalize(v));
 		float newMag = min(mag, MaxParticleSpeed);
@@ -404,11 +271,6 @@ float3 SpeedLimit(float3 v)
 [numthreads(ThreadGroupSize, 1, 1)]
 void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex, uint3 gid : SV_GroupID)
 {
-	
-	//uint3 id3D = flatTo3D(id.x, MaxNumParticles, MaxNumParticles);
-	//float4 tmp = float4(particlePos, 1);
-	//Result[id3D] = tmp;
-	
 	float3 thisPG = PG[id.x];
 	float3 thisVL = VL[id.x];
 	
