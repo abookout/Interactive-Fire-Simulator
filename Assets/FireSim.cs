@@ -3,6 +3,21 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
 
+// For setting up test scenarios
+[System.Serializable]
+public struct DebugParticleData
+{
+    public bool fixInSpace;
+    public Vector3 position;
+    public Vector3 velocity;
+}
+[System.Serializable]
+public struct DebugConfiguration
+{
+    public string description;
+    public List<DebugParticleData> particles;
+}
+
 public class FireSim : MonoBehaviour
 {
     // This should match with the SPH CS!
@@ -28,13 +43,18 @@ public class FireSim : MonoBehaviour
     // Array is saved over updates so it doesn't need keep being allocated
     ParticleSystem.Particle[] particlesArr;
 
+    [Header("Debug configurations")]
+    public List<DebugConfiguration> debugConfigurations;
+    public int selectedDebugConfiguration = 0;          // 0 means none are selected
+    public DebugConfiguration? currentDebugConfiguration => selectedDebugConfiguration == 0 ? null : debugConfigurations[selectedDebugConfiguration - 1];
+
     [Header("Set in inspector")]
     [SerializeField] new ParticleSystem particleSystem;
     [SerializeField, Range(1, MaxNumParticles)] int numParticles = 256;
-    [SerializeField] float particleMass = 0.1f;         // Make it larger to slow down the simulation
-    [SerializeField] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
-    [SerializeField] float pressureStiffness = 1f;
-    [SerializeField] float referenceDensity = 1.18f;                        // Density of air is 1.18 kg/m^3
+    [SerializeField, Min(0)] float particleMass = 0.1f;         // Make it larger to slow down the simulation
+    [SerializeField, Min(0)] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
+    [SerializeField, Min(0)] float pressureStiffness = 1f;
+    [SerializeField, Min(0)] float referenceDensity = 1.18f;                        // Density of air is 1.18 kg/m^3
     [SerializeField] Vector3 externalAccelerations = new(0, 0, 0);
 
     [SerializeField] float spawnVolumeWidth = 2f;
@@ -46,6 +66,7 @@ public class FireSim : MonoBehaviour
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
     [SerializeField] ComputeShader SPHComputeShader;
+
 
     //  Make sure there's at least one thread group!
     int numThreadGroups;
@@ -69,6 +90,23 @@ public class FireSim : MonoBehaviour
 
     public void RespawnParticles()
     {
+        if (selectedDebugConfiguration != 0)
+        {
+            DebugConfiguration config = currentDebugConfiguration.Value;
+            // If using a debug configuration don't respawn as normal, just populate from configuration
+            particleSystem.GetParticles(particlesArr);
+
+            for (int i = 0; i < config.particles.Count; i++)
+            {
+                DebugParticleData p = config.particles[i];
+                particlesArr[i].position = p.position;
+                particlesArr[i].velocity = p.velocity;
+            }
+
+            particleSystem.SetParticles(particlesArr, config.particles.Count);
+            return;
+        }
+
         // Clear and repopulate particles
         particleSystem.Clear();
         UpdateParticleCount();
@@ -94,7 +132,16 @@ public class FireSim : MonoBehaviour
     {
         //Unity.Collections.LowLevel.Unsafe.UnsafeUtility.SetLeakDetectionMode(NativeLeakDetectionMode.EnabledWithStackTrace);
 
-        Initialize();
+        if (selectedDebugConfiguration == 0)
+        {
+            // Initialize as normal
+            Initialize();
+        }
+        else
+        {
+            // Using a debug configuration
+            InitializeFromDebugConfig();
+        }
     }
     private void OnDisable()
     {
@@ -144,8 +191,9 @@ public class FireSim : MonoBehaviour
             fpsLastDrawTime = Time.time;
         }
 
-        // Make sure the number of particles hasn't changed
-        if (particleSystem.particleCount != numParticles)
+        // Make sure the number of particles hasn't changed.
+        // If using a debug configuration, don't update particle count as normal
+        if (selectedDebugConfiguration == 0 && particleSystem.particleCount != numParticles)
         {
             UpdateParticleCount();
         }
@@ -211,32 +259,91 @@ public class FireSim : MonoBehaviour
             EvenlySpaceParticles();
         }
 
-        ParticleData[] dataArr = new ParticleData[MaxNumParticles];
+        ParticleData[] particleDataArr = new ParticleData[MaxNumParticles];
         Vector3[] vec3Arr = new Vector3[MaxNumParticles];
         float[] floatArr = new float[MaxNumParticles];
         for (int i = 0; i < MaxNumParticles; i++)
         {
             if (i < numParticles)
             {
-                Vector3 pos = particlesArr[i].position;
-                if (float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z))
-                {
-                    throw new System.Exception("Found a NaN! index " + i);
-                }
-                dataArr[i].position = particlesArr[i].position;
+                particleDataArr[i].position = particlesArr[i].position;
             }
             else
             {
-                dataArr[i].position = Vector3.zero;
+                particleDataArr[i].position = Vector3.zero;
             }
 
-            dataArr[i].velocity = Vector3.zero;
+            particleDataArr[i].velocity = Vector3.zero;
             vec3Arr[i] = Vector3.zero;
             floatArr[i] = 0f;
         }
 
-        particleDataInputBuffer.SetData(dataArr);
-        particleDataOutputBuffer.SetData(dataArr);       // Initialize output with the same data as input
+        particleDataInputBuffer.SetData(particleDataArr);
+        particleDataOutputBuffer.SetData(particleDataArr);       // Initialize output with the same data as input
+        // Initialize buffer contents to all zeros
+        DBuf.SetData(floatArr);
+        PGBuf.SetData(vec3Arr);
+        VLBuf.SetData(vec3Arr);
+    }
+
+    // Initialize as normal except populate particle data from the selected debug configuration
+    void InitializeFromDebugConfig()
+    {
+        int sizeofVec3 = sizeof(float) * 3;
+
+        // Allocate the maximum amount of particles so that we don't need to keep creating new buffers when the number of particles changes
+        particleDataInputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
+        particleDataOutputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
+
+        DBuf = new ComputeBuffer(MaxNumParticles, sizeof(float));
+        PGBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+        VLBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+
+        // Initialize buffers, using unity's particle system emission shape to choose random initial positions in a box
+        //var psShape = particleSystem.shape;
+        var psMain = particleSystem.main;
+        psMain.maxParticles = MaxNumParticles;
+
+        var psShape = particleSystem.shape;
+        psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
+
+        DebugConfiguration curDebugConfig = (DebugConfiguration)currentDebugConfiguration;
+        numParticles = curDebugConfig.particles.Count;
+
+        // Spawn in the particles from the debug config
+        particlesArr = new ParticleSystem.Particle[numParticles];
+        particleSystem.Emit(numParticles);
+        particleSystem.GetParticles(particlesArr);
+
+        ParticleData[] particleDataArr = new ParticleData[MaxNumParticles];
+        Vector3[] vec3Arr = new Vector3[MaxNumParticles];
+        float[] floatArr = new float[MaxNumParticles];
+        for (int i = 0; i < MaxNumParticles; i++)
+        {
+            if (i < numParticles)
+            {
+                DebugParticleData particle = curDebugConfig.particles[i];
+                particleDataArr[i].position = particle.position;
+                particleDataArr[i].velocity = particle.velocity;
+                // Populate data in ParticleSystem so update uses that
+                particlesArr[i].position = particle.position;
+                particlesArr[i].velocity = particle.velocity;
+            }
+            else
+            {
+                particleDataArr[i].position = Vector3.zero;
+                particleDataArr[i].velocity = Vector3.zero;
+            }
+
+            // Fill with zeros so the buffers aren't initialized with random data
+            vec3Arr[i] = Vector3.zero;
+            floatArr[i] = 0f;
+        }
+
+        particleSystem.SetParticles(particlesArr);
+
+        particleDataInputBuffer.SetData(particleDataArr);
+        particleDataOutputBuffer.SetData(particleDataArr);       // Initialize output with the same data as input
         // Initialize buffer contents to all zeros
         DBuf.SetData(floatArr);
         PGBuf.SetData(vec3Arr);
@@ -387,26 +494,30 @@ public class FireSim : MonoBehaviour
 
             if (usePeriodicBoundary && !particleBounds.Contains(newPosition))
             {
+                // Extra distance to move particle inside cube to make sure it doesn't wrap again right away.
+                //  Experimentally found 0.15 to be about the smallest stable distance
+
+                float insideOffset = 0.15f;       
                 // Check if outside bounds on each of the sides
                 Vector3 posOffsets = particleBounds.center + particleBounds.extents;
                 Vector3 negOffsets = particleBounds.center - particleBounds.extents;
                 if (newPosition.x > posOffsets.x)
-                    newPosition.x -= particleBounds.size.x;
+                    newPosition.x = -particleBounds.extents.x + insideOffset;
 
                 else if (newPosition.x < negOffsets.x)
-                    newPosition.x += particleBounds.size.x;
+                    newPosition.x = +particleBounds.extents.x - insideOffset;
 
                 else if (newPosition.y > posOffsets.y)
-                    newPosition.y -= particleBounds.size.y;
+                    newPosition.y = -particleBounds.extents.y + insideOffset;
 
                 else if (newPosition.y < negOffsets.y)
-                    newPosition.y += particleBounds.size.y;
+                    newPosition.y = +particleBounds.extents.y - insideOffset;
 
                 else if (newPosition.z > posOffsets.z)
-                    newPosition.z -= particleBounds.size.z;
+                    newPosition.z = -particleBounds.extents.z + insideOffset;
 
                 else if (newPosition.z < negOffsets.z)
-                    newPosition.z += particleBounds.size.z;
+                    newPosition.z = +particleBounds.extents.z - insideOffset;
 
                 //newPosition = particleBounds.ClosestPoint(newPosition);
 
@@ -419,8 +530,20 @@ public class FireSim : MonoBehaviour
             }
 
             // Update particle's position and velocity from the gpu data
-            particles[i].position = newPosition;
-            particles[i].velocity = newVelocity;
+            if (selectedDebugConfiguration == 0)
+            {
+                particles[i].position = newPosition;
+                particles[i].velocity = newVelocity;
+            }
+            else
+            {
+                // Using debug configuration, so don't update fixed particles
+                if (currentDebugConfiguration.HasValue && !currentDebugConfiguration.Value.particles[i].fixInSpace)
+                {
+                    particles[i].position = newPosition;
+                    particles[i].velocity = newVelocity;
+                }
+            }
         }
         particleSystem.SetParticles(particles);
     }

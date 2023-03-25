@@ -152,18 +152,37 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 351b14e78a2db8a418b8fd201cb75dd8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  debugConfigurations:
+  - description: 1
+    particles:
+    - fixInSpace: 0
+      position: {x: 0, y: 0, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+    - fixInSpace: 1
+      position: {x: 0.25, y: 0, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+    - fixInSpace: 1
+      position: {x: 0, y: 0.25, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+    - fixInSpace: 1
+      position: {x: 0, y: 0, z: 0.25}
+      velocity: {x: 0, y: 0, z: 0}
+    - fixInSpace: 1
+      position: {x: 0.25, y: 0.25, z: 0.25}
+      velocity: {x: 0, y: 0, z: 0}
+  selectedDebugConfiguration: 0
   particleSystem: {fileID: 2054306561}
-  numParticles: 776
-  particleMass: 1
+  numParticles: 4096
+  particleMass: 4
   viscosity: 6
   pressureStiffness: 10
-  referenceDensity: 1.18
+  referenceDensity: 2
   externalAccelerations: {x: 0, y: 0, z: 0}
   spawnVolumeWidth: 6.72
   usePeriodicBoundary: 1
   particleBounds:
     m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 5, y: 5, z: 5}
+    m_Extent: {x: 4, y: 4, z: 4}
   spawnEvenlySpaced: 1
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
 --- !u!4 &299583915

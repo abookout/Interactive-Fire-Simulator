@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using System.Linq;
 
 [CustomEditor(typeof(FireSim))]
 public class SimulatorEditor : Editor
@@ -15,7 +16,10 @@ public class SimulatorEditor : Editor
             fs.RespawnParticles();
         }
 
-        //GUILayout.SelectionGrid(0, new string[] { "a", "b", "c", "d", "e" }, 6);
+        GUILayout.Label("Select debug configuration");
+        // Select labels and prepend "None"
+        string[] options = fs.debugConfigurations.Select(x => x.description).Prepend("None").ToArray();
+        fs.selectedDebugConfiguration = GUILayout.SelectionGrid(fs.selectedDebugConfiguration, options, fs.debugConfigurations.Count+1);
 
         GUILayout.Space(20);
         DrawDefaultInspector();

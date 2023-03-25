@@ -120,7 +120,7 @@ float3 KernelGradient(float3 r)
 	// To get the resulting vector, pass the magnitude of r to KernelDerivative and use the normalized r vector as the direction component
 	//	to ensure that the gradient is in exactly the right direction and has exactly the correct magnitude (because it is just based on distance!)
 	float rLen = max(0, length(r));
-	float3 dir = saturate(normalize(r));
+	float3 dir = normalize(r);
 	
 	float mag = KernelDerivative(rLen);
 	return mag * dir;
@@ -128,7 +128,7 @@ float3 KernelGradient(float3 r)
 float3 KernelLaplacian(float3 r)
 {
 	float rLen = max(0, length(r));
-	float3 dir = saturate(normalize(r));
+	float3 dir = normalize(r);
 	
 	float mag = KernelSecondDerivative(rLen);
 	return mag * dir;
