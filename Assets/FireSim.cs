@@ -10,6 +10,7 @@ public struct DebugParticleData
     public bool fixInSpace;
     public Vector3 position;
     public Vector3 velocity;
+    public float temperature;
 }
 [System.Serializable]
 public struct DebugConfiguration
@@ -26,9 +27,11 @@ public class FireSim : MonoBehaviour
 
     // Buffer and parameter IDs
     static readonly int
-    // Buffers
+        // Buffers
         dataInputBufID = Shader.PropertyToID("_DataInputBuffer"),
-
+        densityBufID = Shader.PropertyToID("_DensityBuf"),
+        pressureGradientBufID = Shader.PropertyToID("_PressureGradientBuf"),
+        diffusionBufID = Shader.PropertyToID("_DiffusionBuf"),
         dataOutputBufID = Shader.PropertyToID("_DataOutputBuffer"),
 
         // Parameters
@@ -38,30 +41,38 @@ public class FireSim : MonoBehaviour
         pressureStiffnessID = Shader.PropertyToID("_PressureStiffness"),
         viscosityID = Shader.PropertyToID("_Viscosity"),
         referenceDensityID = Shader.PropertyToID("_ReferenceDensity"),
+        heatDiffusionID = Shader.PropertyToID("_HeatDiffusionRate"),
         extAccelerationsID = Shader.PropertyToID("_ExternalAccelerations");
 
     // Array is saved over updates so it doesn't need keep being allocated
     ParticleSystem.Particle[] particlesArr;
+
+    // It's a Vector4 because of how the Unity particle system tracks custom particle data. Only the first component is used. 
+    List<Vector4> particleTemperatureArr = new List<Vector4>();
 
     [Header("Debug configurations")]
     public List<DebugConfiguration> debugConfigurations;
     public int selectedDebugConfiguration = 0;          // 0 means none are selected
     public DebugConfiguration? currentDebugConfiguration => selectedDebugConfiguration == 0 ? null : debugConfigurations[selectedDebugConfiguration - 1];
 
-    [Header("Set in inspector")]
+    [Header("Particle system info")]
     [SerializeField] new ParticleSystem particleSystem;
     [SerializeField, Range(1, MaxNumParticles)] int numParticles = 256;
+
+    [Header("SPH simulation DOFs")]
     [SerializeField, Min(0)] float particleMass = 0.1f;         // Make it larger to slow down the simulation
     [SerializeField, Min(0)] float viscosity = 15.8f;           // Kinematic viscosity of air is 15.8 m^2/s (text p.276)
     [SerializeField, Min(0)] float pressureStiffness = 1f;
     [SerializeField, Min(0)] float referenceDensity = 1.18f;                        // Density of air is 1.18 kg/m^3
+    [SerializeField, Min(0)] float ambientTemperature = 25f;  // degrees Celcius. TODO: is this only useful for initializing particle temp?
+    [SerializeField, Min(0)] float temperatureDiffusionRate = 1f;
     [SerializeField] Vector3 externalAccelerations = new(0, 0, 0);
 
-    [SerializeField] float spawnVolumeWidth = 2f;
-    [SerializeField] bool usePeriodicBoundary = true;
-    [SerializeField] Bounds particleBounds;
-
+    [Header("Simulation spawn volume and bounds")]
     [SerializeField] bool spawnEvenlySpaced = true;
+    [SerializeField] bool usePeriodicBoundary = true;
+    [SerializeField] float spawnVolumeWidth = 2f;
+    [SerializeField] Bounds particleBounds;
 
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
@@ -75,16 +86,17 @@ public class FireSim : MonoBehaviour
     {
         public Vector3 position;
         public Vector3 velocity;
+        public float temperature;
     }
-    const int sizeofParticleData = sizeof(float) * 3 * 2;
+    const int sizeofParticleData = sizeof(float) * 7;
 
     // Particle positions and current velocities are given to the CS kernels as an input.
     //  At the end, position and velocity are set by the ComputePosAndVel kernel by integration.
     [SerializeField] ComputeBuffer particleDataInputBuffer;
     // Buffers for interim calculations
-    [SerializeField] ComputeBuffer DBuf;
-    [SerializeField] ComputeBuffer PGBuf;
-    [SerializeField] ComputeBuffer VLBuf;
+    [SerializeField] ComputeBuffer densityBuf;
+    [SerializeField] ComputeBuffer pressureGradientBuf;
+    [SerializeField] ComputeBuffer diffusionBuf;
     // Buffer for the calculation results
     [SerializeField] ComputeBuffer particleDataOutputBuffer;
 
@@ -217,9 +229,9 @@ public class FireSim : MonoBehaviour
         Vector3[] pg = new Vector3[1];
         Vector3[] vl = new Vector3[1];
         particleSystem.GetParticles(ps);
-        DBuf.GetData(d);
-        PGBuf.GetData(pg);
-        VLBuf.GetData(vl);
+        densityBuf.GetData(d);
+        pressureGradientBuf.GetData(pg);
+        diffusionBuf.GetData(vl);
 
         Debug.Log("Particle 0:\n\tPosition: " + ps[0].position + "\tVelocity: " + ps[0].velocity + "\tDensity: " + d[0] + "\n\tPressure Gradient: " + pg[0] + "\t\tDiffusion: " + vl[0]);
     }
@@ -235,9 +247,9 @@ public class FireSim : MonoBehaviour
         particleDataInputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
         particleDataOutputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
 
-        DBuf = new ComputeBuffer(MaxNumParticles, sizeof(float));
-        PGBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
-        VLBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+        densityBuf = new ComputeBuffer(MaxNumParticles, sizeof(float));
+        pressureGradientBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+        diffusionBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
 
         // Initialize buffers, using unity's particle system emission shape to choose random initial positions in a box
         //var psShape = particleSystem.shape;
@@ -247,11 +259,18 @@ public class FireSim : MonoBehaviour
         var psShape = particleSystem.shape;
         psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
 
+        // Enable custom data for tracking temperature
+        var psCustomData = particleSystem.customData;
+        psCustomData.enabled = true;
+        psCustomData.SetMode(ParticleSystemCustomData.Custom1, ParticleSystemCustomDataMode.Vector);
+        psCustomData.SetVectorComponentCount(ParticleSystemCustomData.Custom1, 1);
+
         // Spawn in the initial particles
         particlesArr = new ParticleSystem.Particle[numParticles];
 
         particleSystem.Emit(numParticles);
         particleSystem.GetParticles(particlesArr);
+        particleSystem.GetCustomParticleData(particleTemperatureArr, ParticleSystemCustomData.Custom1);
 
         // Evenly space them
         if (spawnEvenlySpaced)
@@ -267,10 +286,13 @@ public class FireSim : MonoBehaviour
             if (i < numParticles)
             {
                 particleDataArr[i].position = particlesArr[i].position;
+                particleDataArr[i].temperature = ambientTemperature;
+                particleTemperatureArr[i] = new Vector4(ambientTemperature, 0, 0, 0);
             }
             else
             {
                 particleDataArr[i].position = Vector3.zero;
+                particleTemperatureArr[i] = Vector4.zero;
             }
 
             particleDataArr[i].velocity = Vector3.zero;
@@ -278,12 +300,15 @@ public class FireSim : MonoBehaviour
             floatArr[i] = 0f;
         }
 
+        particleSystem.SetParticles(particlesArr);
+        particleSystem.SetCustomParticleData(particleTemperatureArr, ParticleSystemCustomData.Custom1);
+
         particleDataInputBuffer.SetData(particleDataArr);
         particleDataOutputBuffer.SetData(particleDataArr);       // Initialize output with the same data as input
         // Initialize buffer contents to all zeros
-        DBuf.SetData(floatArr);
-        PGBuf.SetData(vec3Arr);
-        VLBuf.SetData(vec3Arr);
+        densityBuf.SetData(floatArr);
+        pressureGradientBuf.SetData(vec3Arr);
+        diffusionBuf.SetData(vec3Arr);
     }
 
     // Initialize as normal except populate particle data from the selected debug configuration
@@ -295,9 +320,9 @@ public class FireSim : MonoBehaviour
         particleDataInputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
         particleDataOutputBuffer = new ComputeBuffer(MaxNumParticles, sizeofParticleData);
 
-        DBuf = new ComputeBuffer(MaxNumParticles, sizeof(float));
-        PGBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
-        VLBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+        densityBuf = new ComputeBuffer(MaxNumParticles, sizeof(float));
+        pressureGradientBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
+        diffusionBuf = new ComputeBuffer(MaxNumParticles, sizeofVec3);
 
         // Initialize buffers, using unity's particle system emission shape to choose random initial positions in a box
         //var psShape = particleSystem.shape;
@@ -314,6 +339,13 @@ public class FireSim : MonoBehaviour
         particlesArr = new ParticleSystem.Particle[numParticles];
         particleSystem.Emit(numParticles);
         particleSystem.GetParticles(particlesArr);
+        //particleSystem.GetCustomParticleData(particleTemperatureArr, ParticleSystemCustomData.Custom1);
+
+        // Enable custom data for tracking temperature
+        var psCustomData = particleSystem.customData;
+        psCustomData.enabled = true;
+        psCustomData.SetMode(ParticleSystemCustomData.Custom1, ParticleSystemCustomDataMode.Vector);
+        psCustomData.SetVectorComponentCount(ParticleSystemCustomData.Custom1, 1);
 
         ParticleData[] particleDataArr = new ParticleData[MaxNumParticles];
         Vector3[] vec3Arr = new Vector3[MaxNumParticles];
@@ -325,9 +357,11 @@ public class FireSim : MonoBehaviour
                 DebugParticleData particle = curDebugConfig.particles[i];
                 particleDataArr[i].position = particle.position;
                 particleDataArr[i].velocity = particle.velocity;
+                particleDataArr[i].temperature = particle.temperature;
                 // Populate data in ParticleSystem so update uses that
                 particlesArr[i].position = particle.position;
                 particlesArr[i].velocity = particle.velocity;
+                particleTemperatureArr[i] = new Vector4(particle.temperature, 0, 0, 0);
             }
             else
             {
@@ -341,28 +375,30 @@ public class FireSim : MonoBehaviour
         }
 
         particleSystem.SetParticles(particlesArr);
+        particleSystem.SetCustomParticleData(particleTemperatureArr, ParticleSystemCustomData.Custom1);
 
         particleDataInputBuffer.SetData(particleDataArr);
         particleDataOutputBuffer.SetData(particleDataArr);       // Initialize output with the same data as input
         // Initialize buffer contents to all zeros
-        DBuf.SetData(floatArr);
-        PGBuf.SetData(vec3Arr);
-        VLBuf.SetData(vec3Arr);
+        densityBuf.SetData(floatArr);
+        pressureGradientBuf.SetData(vec3Arr);
+        diffusionBuf.SetData(vec3Arr);
     }
 
     void ReleaseBuffers()
     {
         particleDataInputBuffer.Release();
         particleDataOutputBuffer.Release();
-        DBuf.Release();
-        PGBuf.Release();
-        VLBuf.Release();
+        densityBuf.Release();
+        pressureGradientBuf.Release();
+        diffusionBuf.Release();
     }
 
     // Write current particle positions and velocities for acceleration CS
     void WriteParticleDataToGPU()
     {
         particleSystem.GetParticles(particlesArr);
+        particleSystem.GetCustomParticleData(particleTemperatureArr, ParticleSystemCustomData.Custom1);
 
         //TODO: maintain position and velocity arrays so don't need to access from particle system? Not sure if this is a problem
         ParticleData[] dataArray = new ParticleData[numParticles];
@@ -371,6 +407,7 @@ public class FireSim : MonoBehaviour
         {
             dataArray[i].position = particlesArr[i].position;
             dataArray[i].velocity = particlesArr[i].velocity;
+            dataArray[i].temperature = particleTemperatureArr[i].x;
         }
 
         particleDataInputBuffer.SetData(dataArray);
@@ -495,7 +532,7 @@ public class FireSim : MonoBehaviour
             {
                 // Extra distance to move particle inside cube to make sure it doesn't wrap again right away.
                 //  Experimentally found 0.15 to be about the smallest stable distance
-                float insideOffset = 0.15f;       
+                float insideOffset = 0.15f;
 
                 // Check if outside bounds on each of the sides
                 Vector3 posOffsets = particleBounds.center + particleBounds.extents;
@@ -559,13 +596,13 @@ public class FireSim : MonoBehaviour
         SPHComputeShader.SetFloat(particleMassID, particleMass);
 
         // output
-        SPHComputeShader.SetBuffer(id, "D", DBuf);
+        SPHComputeShader.SetBuffer(id, densityBufID, densityBuf);
 
         SPHComputeShader.Dispatch(id, numThreadGroups, 1, 1);
     }
 
-    // Compute pressure gradient and velocity laplacian. Doing both together because
-    //  their calculations are independent of each other. Includes calculation for pressure
+    // Compute pressure gradient, velocity diffusion, and temperature diffusion. Doing them together because their calculations
+    //  are independent of each other and there are several calculations that can be reused. Includes calculation for pressure.
     //
     // PG:
     //  Inputs: particle position (for kernel grad.), pressure, density,
@@ -575,12 +612,16 @@ public class FireSim : MonoBehaviour
     // VL:
     //  Inputs: particle position (for kernel lapl.), velocity, density, _Viscosity, _NumParticles, _ParticleMass
     //  Outputs: VL buf
+    //
+    // Temperature:
+    //  Inputs: particle velocity, pressure, density, mass
+    //  Outputs: particle temperature
     void DispatchPGandVL()
     {
         int id = SPHComputeShader.FindKernel("ComputePGandVL");
         // input - common
         SPHComputeShader.SetBuffer(id, dataInputBufID, particleDataInputBuffer);
-        SPHComputeShader.SetBuffer(id, "D", DBuf);
+        SPHComputeShader.SetBuffer(id, densityBufID, densityBuf);
         SPHComputeShader.SetInt(numParticlesID, numParticles);
         SPHComputeShader.SetFloat(particleMassID, particleMass);
         // input for PG
@@ -590,8 +631,9 @@ public class FireSim : MonoBehaviour
         SPHComputeShader.SetFloat(viscosityID, viscosity);
 
         // output
-        SPHComputeShader.SetBuffer(id, "PG", PGBuf);
-        SPHComputeShader.SetBuffer(id, "VL", VLBuf);
+        SPHComputeShader.SetBuffer(id, pressureGradientBufID, pressureGradientBuf);
+        SPHComputeShader.SetBuffer(id, diffusionBufID, diffusionBuf);
+        SPHComputeShader.SetBuffer(id, dataOutputBufID, particleDataOutputBuffer);
 
         SPHComputeShader.Dispatch(id, numThreadGroups, 1, 1);
     }
@@ -605,8 +647,8 @@ public class FireSim : MonoBehaviour
         int id = SPHComputeShader.FindKernel("ComputePosAndVel");
         // input
         SPHComputeShader.SetBuffer(id, dataInputBufID, particleDataInputBuffer);
-        SPHComputeShader.SetBuffer(id, "PG", PGBuf);
-        SPHComputeShader.SetBuffer(id, "VL", VLBuf);
+        SPHComputeShader.SetBuffer(id, pressureGradientBufID, pressureGradientBuf);
+        SPHComputeShader.SetBuffer(id, diffusionBufID, diffusionBuf);
         SPHComputeShader.SetVector(extAccelerationsID, externalAccelerations);
         SPHComputeShader.SetFloat(particleMassID, particleMass);
         //TODO: timestep!! Should be constant for CFL??? (or have cfl adjust per frame?)

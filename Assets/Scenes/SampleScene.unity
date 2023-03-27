@@ -177,6 +177,7 @@ MonoBehaviour:
   viscosity: 18
   pressureStiffness: 10
   referenceDensity: 2
+  heatDiffusionRate: 1
   externalAccelerations: {x: 0, y: 0, z: 0}
   spawnVolumeWidth: 6.72
   usePeriodicBoundary: 1
@@ -4688,9 +4689,9 @@ ParticleSystem:
         m_NumColorKeys: 2
         m_NumAlphaKeys: 2
   CustomDataModule:
-    enabled: 0
+    enabled: 1
     mode0: 1
-    vectorComponentCount0: 4
+    vectorComponentCount0: 1
     color0:
       serializedVersion: 2
       minMaxState: 0

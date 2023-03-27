@@ -25,7 +25,7 @@
 
 // CFL condition (from Ihmsen 2014): timestep <= 0.4 * particle_diameter / max_speed.
 // The CFL condition says that the max speed is <= some factor (0.4) times the particle diameter per timestep.
-#define MaxParticleSpeed 1.0f /* <-- if 1, equals max speed. Can be less */* 0.4f * ParticleDiameter / Timestep
+#define MaxParticleSpeed 0.4f * ParticleDiameter / Timestep
 
 //	https://docs.unity3d.com/Manual/SL-PlatformDifferences.html "Using buffers with GPU buffers"
 
@@ -33,6 +33,7 @@ struct ParticleData
 {
 	float3 position;
 	float3 velocity;
+	float temperature;
 };
 
 float3 _ExternalAccelerations;
@@ -42,6 +43,7 @@ half _ParticleMass;
 half _Viscosity;
 half _PressureStiffness;
 half _ReferenceDensity;
+half _HeatDiffusionRate;
 // Magnitude of force due to gravity, and all other external accelerations. Note: when applying a force to a single particle, 
 //	need to scale by the particle's local density! text p. 288
 
@@ -52,9 +54,9 @@ RWStructuredBuffer<ParticleData> _DataOutputBuffer : register(u1);
 RWStructuredBuffer<float3> _AccelerationOutputBuffer : register(u2);
 
 // Data buffers for interim calculations
-RWStructuredBuffer<float> D : register(u3); // density
-RWStructuredBuffer<float3> PG : register(u4); // pressure grad
-RWStructuredBuffer<float3> VL : register(u5); // velocity lap
+RWStructuredBuffer<float> _DensityBuf : register(u3); // density
+RWStructuredBuffer<float3> _PressureGradientBuf : register(u4); // pressure grad
+RWStructuredBuffer<float3> _DiffusionBuf : register(u5); // velocity lap
 
 // Assume total shared memory of 16KB. Across 64 threads is 250 bytes per thread. Across 128 threads is 125B.
 
@@ -194,7 +196,7 @@ void ComputeDensity(uint3 id : SV_DispatchThreadID)
 		// Formula for particle density
 		thisDensity += _ParticleMass * kernelVal;
 	}
-	D[id.x] = thisDensity;
+	_DensityBuf[id.x] = thisDensity;
 }
 
 [numthreads(ThreadGroupSize, 1, 1)]
@@ -205,7 +207,7 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	float3 thisPos = thisData.position;
 	float3 thisVel = thisData.velocity;
 	
-	float thisDensity = D[id.x];
+	float thisDensity = _DensityBuf[id.x];
 	float thisPressure = _PressureStiffness * (thisDensity - _ReferenceDensity);
 	
 	float3 resultingPG = float3(0, 0, 0);
@@ -223,7 +225,7 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		////// Pressure gradient
 		
 		ParticleData otherData = _DataInputBuffer[i];
-		float otherDensity = D[i];
+		float otherDensity = _DensityBuf[i];
 		float otherPressure = _PressureStiffness * (otherDensity - _ReferenceDensity);
 		
 		float3 posDifference = thisPos - otherData.position;
@@ -254,12 +256,22 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		
 		// Formula for velocity laplacian
 		resultingVL += (otherVel - thisVel) * thisInvDensity * kernelLap;
+		
+		
+		/////// Temperature diffusion
+		//TODO: could there be a problem with using the data output buffer here and it's actually the same as the input buffer?
+		ParticleData data;
+		data.position = thisData.position;
+		data.velocity = thisData.velocity;
+		data.temperature = 0;				//TODO: actual calculation
+		_DataOutputBuffer[id.x] = data;
+		
 	}
 	
 	// Can pull out mass from sums because it's constant
-	PG[id.x] = _ParticleMass * resultingPG;
+	_PressureGradientBuf[id.x] = _ParticleMass * resultingPG;
 	// (diffusion actually, since the viscosity term is baked in here)
-	VL[id.x] = _Viscosity * _ParticleMass * resultingVL;
+	_DiffusionBuf[id.x] = _Viscosity * _ParticleMass * resultingVL;
 }
 
 // Clamp given float3 to have length at most MaxParticleSpeed
@@ -280,8 +292,8 @@ float3 SpeedLimit(float3 v)
 [numthreads(ThreadGroupSize, 1, 1)]
 void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIndex, uint3 gid : SV_GroupID)
 {
-	float3 thisPG = PG[id.x];
-	float3 thisVL = VL[id.x];
+	float3 thisPG = _PressureGradientBuf[id.x];
+	float3 thisVL = _DiffusionBuf[id.x];
 	
 	float3 forcesOnThis = -thisPG + thisVL + _ExternalAccelerations;
 	
@@ -297,6 +309,7 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	ParticleData data;
 	data.position = newPos;
 	data.velocity = SpeedLimit(newVel);
+	data.temperature = oldData.temperature;			//TODO: change this!
 	//data.velocity = newVel;
 	
 	_DataOutputBuffer[id.x] = data;
