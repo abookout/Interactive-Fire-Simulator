@@ -74,6 +74,11 @@ public class FireSim : MonoBehaviour
     [SerializeField] float spawnVolumeWidth = 2f;
     [SerializeField] Bounds particleBounds;
 
+    [Header("Temperature attributes")]
+    [SerializeField] Color flameParticleColor;
+    [SerializeField] Color coolParticleColor;
+    [SerializeField] float flameTempThreshold = 100;    // Min temp for particle to be a part of fire (and be rendered)
+
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
     [SerializeField] ComputeShader SPHComputeShader;
@@ -258,6 +263,11 @@ public class FireSim : MonoBehaviour
 
         var psShape = particleSystem.shape;
         psShape.scale = new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth);
+
+        // Set as constant color (doesn't change over lifetime)
+        var psColor = particleSystem.colorOverLifetime;
+        psColor.color = new ParticleSystem.MinMaxGradient(coolParticleColor);
+        psColor.enabled = true;
 
         // Enable custom data for tracking temperature
         var psCustomData = particleSystem.customData;
@@ -503,13 +513,15 @@ public class FireSim : MonoBehaviour
         DispatchPGandVL();
         DispatchPosAndVel();
 
-        ParticleSystem.Particle[] particles = new ParticleSystem.Particle[numParticles];
-        particleSystem.GetParticles(particles);
+        // Populate arrays
+        particleSystem.GetParticles(particlesArr);
+        particleSystem.GetCustomParticleData(particleTemperatureArr, ParticleSystemCustomData.Custom1);
 
         //// Position & velocity buffer is now updated, so set particles from that.
         ParticleData[] dataArray = new ParticleData[numParticles];
         particleDataOutputBuffer.GetData(dataArray);
 
+        // Update particle position, velocity, use boundary conditions, apply coloring based on temperature
         for (int i = 0; i < numParticles; i++)
         {
             Vector3 newPosition = dataArray[i].position;
@@ -568,20 +580,24 @@ public class FireSim : MonoBehaviour
             // Update particle's position and velocity from the gpu data
             if (selectedDebugConfiguration == 0)
             {
-                particles[i].position = newPosition;
-                particles[i].velocity = newVelocity;
+                particlesArr[i].position = newPosition;
+                particlesArr[i].velocity = newVelocity;
             }
             else
             {
                 // Using debug configuration, so don't update fixed particles
                 if (currentDebugConfiguration.HasValue && !currentDebugConfiguration.Value.particles[i].fixInSpace)
                 {
-                    particles[i].position = newPosition;
-                    particles[i].velocity = newVelocity;
+                    particlesArr[i].position = newPosition;
+                    particlesArr[i].velocity = newVelocity;
                 }
             }
+
+            // Color based on temp
+            float particleTemp = particleTemperatureArr[i].x;
+            particlesArr[i].startColor = particleTemp > flameTempThreshold ? flameParticleColor : coolParticleColor;
         }
-        particleSystem.SetParticles(particles);
+        particleSystem.SetParticles(particlesArr);
     }
 
     // Compute density
