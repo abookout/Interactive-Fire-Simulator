@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
+using System.Linq;
 
 // For setting up test scenarios
 [System.Serializable]
@@ -72,6 +73,7 @@ public class FireSim : MonoBehaviour
     [Header("Simulation spawn volume and bounds")]
     [SerializeField] bool spawnEvenlySpaced = true;
     [SerializeField] bool usePeriodicBoundary = true;
+    [SerializeField] bool resetTemperatureOnPassingPeriodicBoundary = true;
     [SerializeField] float spawnVolumeWidth = 2f;
     [SerializeField] Bounds particleBounds;
 
@@ -79,6 +81,12 @@ public class FireSim : MonoBehaviour
     [SerializeField] Color flameParticleColor;
     [SerializeField] Color coolParticleColor;
     [SerializeField] float flameTempThreshold = 100;    // Min temp for particle to be a part of fire (and be rendered)
+
+    [Header("Heat source attributes")]
+    // The heat source instantly sets any particles within to the set temperature
+    [SerializeField] bool useHeatSource = false;
+    [SerializeField, Min(0)] float heatSourceTemperature;
+    [SerializeField] Bounds heatSourceBounds;
 
     [Header("Buffer & shader object properties")]
     // Main compute shader for calulating update to particles
@@ -135,6 +143,9 @@ public class FireSim : MonoBehaviour
         particleSystem.Clear();
         UpdateParticleCount();
 
+        // Reset temperatures
+        particleTemperatureArr = new List<Vector4>(Enumerable.Repeat(new Vector4(ambientTemperature, 0, 0, 0), particlesArr.Length));
+
         if (spawnEvenlySpaced)
         {
             EvenlySpaceParticles();
@@ -147,7 +158,13 @@ public class FireSim : MonoBehaviour
         Gizmos.DrawWireCube(particleSystem.transform.position, new Vector3(spawnVolumeWidth, spawnVolumeWidth, spawnVolumeWidth));
 
         Gizmos.color = Color.blue;
-        Gizmos.DrawWireCube(particleSystem.transform.position, particleBounds.extents * 2);
+        Gizmos.DrawWireCube(particleSystem.transform.position, particleBounds.size);
+
+        if (useHeatSource)
+        {
+            Gizmos.color = Color.magenta;
+            Gizmos.DrawWireCube(heatSourceBounds.center, heatSourceBounds.size);
+        }
     }
 
 
@@ -220,15 +237,17 @@ public class FireSim : MonoBehaviour
         temperatureDiffusionBuf.GetData(tempdiff);
         diffusionBuf.GetData(vl);
 
+        const int maxNumToPrint = 10;
+
         Debug.Log("============== Start debug print ==============");
-        for (int i = 0; i < num; i++)
+        for (int i = 0; i < Mathf.Min(num, maxNumToPrint); i++)
         {
-            Debug.Log("Particle " + i + ":\n\tPosition: " + ps[i].position 
-                + "\tVelocity: " + ps[i].velocity 
-                + "\tTemp: " + temp[i].x 
-                + "\tDensity: " + d[i] 
-                + "\n\tPressure Gradient: " + pg[i] 
-                + "\t\tDiffusion: " + vl[i] 
+            Debug.Log("Particle " + i + ":\n\tPosition: " + ps[i].position
+                + "\tVelocity: " + ps[i].velocity
+                + "\tTemp: " + temp[i].x
+                + "\tDensity: " + d[i]
+                + "\n\tPressure Gradient: " + pg[i]
+                + "\t\tDiffusion: " + vl[i]
                 + "\n\tTemperature Diffusion: " + tempdiff[i]);
         }
         Debug.Log("=============== End debug print ===============");
@@ -240,6 +259,7 @@ public class FireSim : MonoBehaviour
     void PopulateParticleArrays()
     {
         particleSystem.GetParticles(particlesArr, numParticles);
+        // Ensure that the temperature array is long enough (without calling GetCustomParticleData...)
         if (particleTemperatureArr.Count < numParticles)
         {
             for (int i = 0; i < numParticles; i++)
@@ -307,8 +327,15 @@ public class FireSim : MonoBehaviour
         // Send positions and velocities to GPU
         WriteParticleDataToGPU();
 
+
         // Perform SPH calculations
         SimulateParticles();
+
+        // If particles are in the heat source, override their temp from it
+        if (useHeatSource)
+        {
+            ApplyTemperatureFromHeatSource();
+        }
 
         // Set data in particle systems to draw updated data
         particleSystem.SetParticles(particlesArr);
@@ -559,6 +586,18 @@ public class FireSim : MonoBehaviour
         //particleSystem.SetParticles(particlesArr, numParticles);
     }
 
+    // Set any particles within the heat source to its temperature
+    void ApplyTemperatureFromHeatSource()
+    {
+        for (int i = 0; i < particlesArr.Length; i++)
+        {
+            if (heatSourceBounds.Contains(particlesArr[i].position))
+            {
+                particleTemperatureArr[i] = new Vector4(heatSourceTemperature, 0, 0, 0);
+            }
+        }
+    }
+
     // Dispatch a job to the GPU to run a new SPH simulation step
     void SimulateParticles()
     {
@@ -628,14 +667,12 @@ public class FireSim : MonoBehaviour
                 else if (newPosition.z < negOffsets.z)
                     newPosition.z = +particleBounds.extents.z - insideOffset;
 
-                //newPosition = particleBounds.ClosestPoint(newPosition);
-
-                // Find the closest position on the bounds and stick the particle on the OPPOSITE side of the boundary (with the same velocity)
-                //Vector3 closestPointOnBounds = particleBounds.ClosestPoint(newPosition);
-
-                // Difference between new position and the closest point on the boundary surface; this vector shows the direction the particle
-                //  will be moved 
-                //Vector3 dir = newPosition - closestPointOnBounds;
+                // Resetting the temperature when a particle jumps across to the other side of the boundary simulates ambient-temperature air flowing in.
+                //  Acts as a heat sink.
+                if (resetTemperatureOnPassingPeriodicBoundary)
+                {
+                    newTemperature = ambientTemperature;
+                }
             }
 
             // Update particles from the gpu data
