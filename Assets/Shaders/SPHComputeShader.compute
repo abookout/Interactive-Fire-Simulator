@@ -37,7 +37,7 @@ struct ParticleData
 };
 
 float3 _ExternalAccelerations;
-float _DeltaTime;				//TODO: using Timestep for now!!
+float _DeltaTime; //TODO: using Timestep for now!!
 int _NumParticles;
 half _ParticleMass;
 half _Viscosity;
@@ -54,9 +54,10 @@ RWStructuredBuffer<ParticleData> _DataOutputBuffer : register(u1);
 RWStructuredBuffer<float3> _AccelerationOutputBuffer : register(u2);
 
 // Data buffers for interim calculations
-RWStructuredBuffer<float> _DensityBuf : register(u3); // density
-RWStructuredBuffer<float3> _PressureGradientBuf : register(u4); // pressure grad
-RWStructuredBuffer<float3> _DiffusionBuf : register(u5); // velocity lap
+RWStructuredBuffer<float> _DensityBuf : register(u3);
+RWStructuredBuffer<float3> _PressureGradientBuf : register(u4);
+RWStructuredBuffer<float> _TemperatureDiffusionBuf : register(u5);
+RWStructuredBuffer<float3> _DiffusionBuf : register(u6);
 
 // Assume total shared memory of 16KB. Across 64 threads is 250 bytes per thread. Across 128 threads is 125B.
 
@@ -206,12 +207,14 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	ParticleData thisData = _DataInputBuffer[id.x];
 	float3 thisPos = thisData.position;
 	float3 thisVel = thisData.velocity;
+	float thisTemp = thisData.temperature;
 	
 	float thisDensity = _DensityBuf[id.x];
 	float thisPressure = _PressureStiffness * (thisDensity - _ReferenceDensity);
 	
-	float3 resultingPG = float3(0, 0, 0);
-	float3 resultingVL = float3(0, 0, 0);
+	float3 resultingPressureGrad = float3(0, 0, 0);
+	float3 resultingVelocityDiffusion = float3(0, 0, 0);
+	float resultingTempDiffusion = 0;
 
 	[loop]
 	for (int i = 0; i < _NumParticles; i++)
@@ -247,31 +250,33 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		float otherPressureOverSquaredDensity = otherPressure * otherInvDensity * otherInvDensity;
 
 		// Formula for pressure gradient 
-		resultingPG += (thisPressureOverSquaredDensity + otherPressureOverSquaredDensity) * kernelGrad;
-
+		resultingPressureGrad += (thisPressureOverSquaredDensity + otherPressureOverSquaredDensity) * kernelGrad;
+		
 		////// Diffusion
 		
 		float3 kernelLap = KernelLaplacian(posDifference);
 		float3 otherVel = otherData.velocity;
 		
 		// Formula for velocity laplacian
-		resultingVL += (otherVel - thisVel) * thisInvDensity * kernelLap;
+		resultingVelocityDiffusion += (otherVel - thisVel) * thisInvDensity * kernelLap;
 		
 		
-		/////// Temperature diffusion
-		//TODO: could there be a problem with using the data output buffer here and it's actually the same as the input buffer?
-		ParticleData data;
-		data.position = thisData.position;
-		data.velocity = thisData.velocity;
-		data.temperature = 0;				//TODO: actual calculation
-		_DataOutputBuffer[id.x] = data;
+		////// Temperature Diffusion from other to this
+		// Calculated essentially in the same way as the formula for velocity. Using the heat equation.
 		
+		//TODO: temperature momentum (including density)??? Does this make sense? 
+		// Regular kernel because just want influence to drop off (and be symmetrical)
+		float otherTemp = otherData.temperature;
+		float regularKernel = Kernel(length(posDifference));
+		resultingTempDiffusion += (otherTemp - thisTemp) * thisInvDensity * regularKernel;
 	}
 	
 	// Can pull out mass from sums because it's constant
-	_PressureGradientBuf[id.x] = _ParticleMass * resultingPG;
-	// (diffusion actually, since the viscosity term is baked in here)
-	_DiffusionBuf[id.x] = _Viscosity * _ParticleMass * resultingVL;
+	_PressureGradientBuf[id.x] = _ParticleMass * resultingPressureGrad;
+
+	_DiffusionBuf[id.x] = _Viscosity * _ParticleMass * resultingVelocityDiffusion;
+
+	_TemperatureDiffusionBuf[id.x] = _HeatDiffusionRate * _ParticleMass * resultingTempDiffusion;
 }
 
 // Clamp given float3 to have length at most MaxParticleSpeed
@@ -294,6 +299,7 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 {
 	float3 thisPG = _PressureGradientBuf[id.x];
 	float3 thisVL = _DiffusionBuf[id.x];
+	float thisTempDiffusion = _TemperatureDiffusionBuf[id.x];
 	
 	float3 forcesOnThis = -thisPG + thisVL + _ExternalAccelerations;
 	
@@ -301,6 +307,10 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	ParticleData oldData = _DataInputBuffer[id.x];
 	float3 oldPos = oldData.position;
 	float3 oldVel = oldData.velocity;
+	float oldTemp = oldData.temperature;
+	
+	// Temperature diffusion buffer stores the change in temperature per particle
+	float newTemp = oldTemp + thisTempDiffusion;
 	
 	// Symplectic euler with a = F/m
 	float3 newVel = oldVel + Timestep * forcesOnThis / _ParticleMass;
@@ -308,9 +318,9 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 
 	ParticleData data;
 	data.position = newPos;
-	data.velocity = SpeedLimit(newVel);
-	data.temperature = oldData.temperature;			//TODO: change this!
 	//data.velocity = newVel;
+	data.velocity = SpeedLimit(newVel);
+	data.temperature = newTemp;
 	
 	_DataOutputBuffer[id.x] = data;
 }

@@ -155,36 +155,45 @@ MonoBehaviour:
   debugConfigurations:
   - description: 1
     particles:
-    - fixInSpace: 0
+    - fixInSpace: 1
       position: {x: 0, y: 0, z: 0}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 500
     - fixInSpace: 1
       position: {x: 0.25, y: 0, z: 0}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
     - fixInSpace: 1
       position: {x: 0, y: 0.25, z: 0}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
     - fixInSpace: 1
       position: {x: 0, y: 0, z: 0.25}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
     - fixInSpace: 1
       position: {x: 0.25, y: 0.25, z: 0.25}
       velocity: {x: 0, y: 0, z: 0}
-  selectedDebugConfiguration: 0
+      temperature: 0
+  selectedDebugConfiguration: 1
   particleSystem: {fileID: 2054306561}
   numParticles: 4096
   particleMass: 1
   viscosity: 18
   pressureStiffness: 10
   referenceDensity: 2
-  heatDiffusionRate: 1
+  ambientTemperature: 25
+  temperatureDiffusionRate: 0.1
   externalAccelerations: {x: 0, y: 0, z: 0}
-  spawnVolumeWidth: 6.72
+  spawnEvenlySpaced: 0
   usePeriodicBoundary: 1
+  spawnVolumeWidth: 6.72
   particleBounds:
     m_Center: {x: 0, y: 0, z: 0}
     m_Extent: {x: 4, y: 4, z: 4}
-  spawnEvenlySpaced: 0
+  flameParticleColor: {r: 1, g: 0, b: 0, a: 1}
+  coolParticleColor: {r: 1, g: 1, b: 1, a: 0.19215687}
+  flameTempThreshold: 100
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
 --- !u!4 &299583915
 Transform:
