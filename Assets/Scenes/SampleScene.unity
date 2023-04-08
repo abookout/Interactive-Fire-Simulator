@@ -158,48 +158,58 @@ MonoBehaviour:
     - fixInSpace: 1
       position: {x: 0, y: 0, z: 0}
       velocity: {x: 0, y: 0, z: 0}
-      temperature: 500
+      temperature: 20
     - fixInSpace: 1
-      position: {x: 0.25, y: 0, z: 0}
+      position: {x: 0.1, y: 0, z: 0}
       velocity: {x: 0, y: 0, z: 0}
       temperature: 0
     - fixInSpace: 1
-      position: {x: 0, y: 0.25, z: 0}
+      position: {x: 0, y: 0.1, z: 0}
       velocity: {x: 0, y: 0, z: 0}
       temperature: 0
     - fixInSpace: 1
-      position: {x: 0, y: 0, z: 0.25}
+      position: {x: 0, y: 0, z: 0.1}
       velocity: {x: 0, y: 0, z: 0}
       temperature: 0
     - fixInSpace: 1
-      position: {x: 0.25, y: 0.25, z: 0.25}
+      position: {x: 0.1, y: 0.1, z: 0.1}
       velocity: {x: 0, y: 0, z: 0}
       temperature: 0
+  - description: 2
+    particles:
+    - fixInSpace: 1
+      position: {x: 0, y: 0, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+      temperature: 50
+    - fixInSpace: 1
+      position: {x: 0.5, y: 0, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+      temperature: 1
   selectedDebugConfiguration: 0
   particleSystem: {fileID: 2054306561}
   numParticles: 4096
-  particleMass: 1
+  particleMass: 0.5
   viscosity: 18
   pressureStiffness: 10
-  referenceDensity: 2
+  referenceDensity: 8
   ambientTemperature: 25
-  temperatureDiffusionRate: 0.1
+  temperatureDiffusionRate: 0.01
   externalAccelerations: {x: 0, y: 0, z: 0}
   spawnEvenlySpaced: 0
   usePeriodicBoundary: 1
   resetTemperatureOnPassingPeriodicBoundary: 1
-  spawnVolumeWidth: 6.72
+  spawnVolumeWidth: 6
   particleBounds:
     m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 4, y: 4, z: 4}
-  flameParticleColor: {r: 1, g: 0, b: 0, a: 1}
-  coolParticleColor: {r: 1, g: 1, b: 1, a: 0.19215687}
-  flameTempThreshold: 100
+    m_Extent: {x: 3, y: 3, z: 3}
+  flameParticleColor: {r: 1, g: 0.13757895, b: 0, a: 1}
+  coolParticleColor: {r: 0.990566, g: 0.80833924, b: 0.80833924, a: 0.078431375}
+  flameTempThreshold: 500
   useHeatSource: 1
-  heatSourceTemperature: 500
+  heatSourceTemperature: 2000
   heatSourceBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 1, y: 1, z: 1}
+    m_Center: {x: 0, y: -1.33, z: 0}
+    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
 --- !u!4 &299583915
 Transform:
@@ -300,14 +310,14 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_LocalRotation: {x: 0.10212373, y: 0.76140386, z: -0.12379789, w: 0.62809956}
-  m_LocalPosition: {x: -14.27, y: 3.84, z: 1.79}
+  m_LocalRotation: {x: 0.05213217, y: 0.71976984, z: -0.054372415, w: 0.69011396}
+  m_LocalPosition: {x: -5.68, y: 0.92, z: 0.13}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 18.47, y: 100.96, z: 0}
+  m_LocalEulerAnglesHint: {x: 8.64, y: 92.41, z: 0}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0

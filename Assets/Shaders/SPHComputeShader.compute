@@ -43,6 +43,7 @@ half _ParticleMass;
 half _Viscosity;
 half _PressureStiffness;
 half _ReferenceDensity;
+half _AmbientTemperature;
 half _HeatDiffusionRate;
 // Magnitude of force due to gravity, and all other external accelerations. Note: when applying a force to a single particle, 
 //	need to scale by the particle's local density! text p. 288
@@ -195,7 +196,9 @@ void ComputeDensity(uint3 id : SV_DispatchThreadID)
 		float kernelVal = Kernel(dist);
 
 		// Formula for particle density
-		thisDensity += _ParticleMass * kernelVal;
+		// TODO: theoretically should include temperature here? Makes it super unstable.
+		//float thisTemp = thisData.temperature;
+		thisDensity += _ParticleMass * kernelVal;// / thisTemp;
 	}
 	_DensityBuf[id.x] = thisDensity;
 }
@@ -210,7 +213,8 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 	float thisTemp = thisData.temperature;
 	
 	float thisDensity = _DensityBuf[id.x];
-	float thisPressure = _PressureStiffness * (thisDensity - _ReferenceDensity);
+	// TODO: theoretically should include temperature here? Makes it super unstable. using the principle of the combined gas law, that pressure is directly proportional to temperature
+	float thisPressure = _PressureStiffness * (thisDensity - _ReferenceDensity); // * thisTemp;
 	
 	float3 resultingPressureGrad = float3(0, 0, 0);
 	float3 resultingVelocityDiffusion = float3(0, 0, 0);
@@ -227,9 +231,11 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		
 		////// Pressure gradient
 		
-		ParticleData otherData = _DataInputBuffer[i];
 		float otherDensity = _DensityBuf[i];
-		float otherPressure = _PressureStiffness * (otherDensity - _ReferenceDensity);
+		ParticleData otherData = _DataInputBuffer[i];
+		float otherTemp = otherData.temperature;
+		
+		float otherPressure = _PressureStiffness * (otherDensity - _ReferenceDensity);// * otherTemp;
 		
 		float3 posDifference = thisPos - otherData.position;
 		float dist = max(0, length(posDifference));
@@ -266,7 +272,6 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		
 		//TODO: temperature momentum (including density)??? Does this make sense? 
 		// Regular kernel because just want influence to drop off (and be symmetrical)
-		float otherTemp = otherData.temperature;
 		float regularKernel = Kernel(length(posDifference));
 		resultingTempDiffusion += (otherTemp - thisTemp) * thisInvDensity * regularKernel;
 	}
@@ -311,6 +316,9 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	
 	// Temperature diffusion buffer stores the change in temperature per particle
 	float newTemp = oldTemp + thisTempDiffusion;
+	
+	// Influence of heat (simple!! Not necessarily physically based!)
+	forcesOnThis += -float3(0, 9.81, 0) * (1 / newTemp) * (_AmbientTemperature - newTemp);
 	
 	// Symplectic euler with a = F/m
 	float3 newVel = oldVel + Timestep * forcesOnThis / _ParticleMass;
