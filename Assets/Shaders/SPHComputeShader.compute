@@ -18,7 +18,7 @@
 #define sInv (1 / KernelSupport)
 
 //TODO: pay attention to timestep!!! Should be defined by unity?
-#define Timestep 0.02f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
+#define Timestep 0.05f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Just for CFL condition? 
 #define ParticleDiameter 0.001f
@@ -134,17 +134,12 @@ float3 KernelGradient(float3 r)
 	float mag = KernelDerivative(rLen);
 	return mag * dir;
 }
-float3 KernelLaplacian(float3 r)
+
+float KernelLaplacian(float3 r)
 {
 	float rLen = max(0, length(r));
-	float3 dir = normalize(r);
-	if (any(isnan(dir)))
-	{
-		dir = float3(0, 0, 0);
-	}
-	
 	float mag = KernelSecondDerivative(rLen);
-	return mag * dir;
+	return mag;
 }
 
 /*
@@ -260,7 +255,7 @@ void ComputePGandVL(uint3 id : SV_DispatchThreadID)
 		
 		////// Diffusion
 		
-		float3 kernelLap = KernelLaplacian(posDifference);
+		float kernelLap = KernelLaplacian(posDifference);
 		float3 otherVel = otherData.velocity;
 		
 		// Formula for velocity laplacian
@@ -319,6 +314,8 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	
 	// Influence of heat (simple!! Not necessarily physically based!)
 	forcesOnThis += -float3(0, 9.81, 0) * (1 / newTemp) * (_AmbientTemperature - newTemp);
+	
+	//TODO: What if instead of ambient temperature used kernel of nearby temps???
 	
 	// Symplectic euler with a = F/m
 	float3 newVel = oldVel + Timestep * forcesOnThis / _ParticleMass;

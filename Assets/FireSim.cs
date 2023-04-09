@@ -634,6 +634,8 @@ public class FireSim : MonoBehaviour
             float newTemperature = dataArray[i].temperature;
 
             ////// TODO: Testing: if particle got NaN'd, fix it so it's easier to find the problem
+            ///
+            /*
             if (float.IsNaN(newPosition.magnitude))
             {
                 Debug.LogWarning("Particle " + i + " had NaN position " + newPosition);
@@ -644,6 +646,7 @@ public class FireSim : MonoBehaviour
                 Debug.LogWarning("Particle " + i + " had NaN velocity " + newVelocity);
                 newVelocity = Vector3.zero;
             }
+            */
 
             bool particleFixed = currentDebugConfiguration.HasValue && currentDebugConfiguration.Value.particles[i].fixInSpace;
 

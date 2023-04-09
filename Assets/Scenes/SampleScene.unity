@@ -193,7 +193,7 @@ MonoBehaviour:
   pressureStiffness: 10
   referenceDensity: 8
   ambientTemperature: 25
-  temperatureDiffusionRate: 0.01
+  temperatureDiffusionRate: 0.2
   externalAccelerations: {x: 0, y: 0, z: 0}
   spawnEvenlySpaced: 0
   usePeriodicBoundary: 1
@@ -204,7 +204,7 @@ MonoBehaviour:
     m_Extent: {x: 3, y: 3, z: 3}
   flameParticleColor: {r: 1, g: 0.13757895, b: 0, a: 1}
   coolParticleColor: {r: 0.990566, g: 0.80833924, b: 0.80833924, a: 0.078431375}
-  flameTempThreshold: 500
+  flameTempThreshold: 800
   useHeatSource: 1
   heatSourceTemperature: 2000
   heatSourceBounds:
