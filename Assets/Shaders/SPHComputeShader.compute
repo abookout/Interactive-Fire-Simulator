@@ -153,6 +153,9 @@ uint3 flatTo3D(uint1 val, int w, int h)
 }
 */
 
+// The computation is organized into separate kernels because each one depends on the completion of the previous. There's no way to wait for all threads
+//	to complete, as not all threads are executed simultaneously.
+
 // numthreads(x,y,z) declares that each thread group is a grid of x*y*z threads. A multiple of 64 threads is a good number bc the thread warp size is either 32 or 64 depending on gpu.
 [numthreads(ThreadGroupSize, 1, 1)]
 
@@ -301,8 +304,6 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	float3 thisVL = _DiffusionBuf[id.x];
 	float thisTempDiffusion = _TemperatureDiffusionBuf[id.x];
 	
-	float3 forcesOnThis = -thisPG + thisVL + _ExternalAccelerations;
-	
 	// Use symplectic euler to update position and velocity
 	ParticleData oldData = _DataInputBuffer[id.x];
 	float3 oldPos = oldData.position;
@@ -312,13 +313,16 @@ void ComputePosAndVel(uint3 id : SV_DispatchThreadID, uint groupIdx : SV_GroupIn
 	// Temperature diffusion buffer stores the change in temperature per particle
 	float newTemp = oldTemp + thisTempDiffusion;
 	
-	// Influence of heat (simple!! Not necessarily physically based!)
-	forcesOnThis += -float3(0, 9.81, 0) * (1 / newTemp) * (_AmbientTemperature - newTemp);
+	// Influence of heat (simple!! Not necessarily physically based!) Converted to accel
+	float3 buoyancy = -float3(0, 9.81, 0) / _ParticleMass * (_AmbientTemperature - newTemp) / newTemp;
 	
-	//TODO: What if instead of ambient temperature used kernel of nearby temps???
+	float3 acceleration = -thisPG + thisVL + buoyancy + _ExternalAccelerations;
+	
+	//TODO: Instead of ambient temperature used kernel of nearby temps??? Solenthaler 2007 eqn 21!!!
+	//TODO: Easy smoke by adding a flag to particles to tell whether theyve been inside a heat source, and if so, when they cool off they should be rendered as smoke
 	
 	// Symplectic euler with a = F/m
-	float3 newVel = oldVel + Timestep * forcesOnThis / _ParticleMass;
+	float3 newVel = oldVel + acceleration * Timestep;
 	float3 newPos = oldPos + newVel * Timestep;
 
 	ParticleData data;

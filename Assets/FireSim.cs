@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
 using System.Linq;
+using System.IO;
 
 // For setting up test scenarios
 [System.Serializable]
@@ -194,7 +195,7 @@ public class FireSim : MonoBehaviour
     }
 
 
-    readonly float fpsDrawInterval = 0.5f;
+    readonly float fpsDrawInterval = 0.1f;
     int fpsLastVal = -1;
     float fpsLastDrawTime = 0;
     private void OnGUI()
@@ -257,6 +258,7 @@ public class FireSim : MonoBehaviour
         Debug.Log("=============== End debug print ===============");
     }
 
+
     // Populate particle position, velocity, and temperature data from the particle system.
     // Caution: particle data only seems to be updated within the particle system after every frame - setting particle data and then 
     //  getting it again in the same update overwrites the data with the data from last frame!!!
@@ -301,6 +303,72 @@ public class FireSim : MonoBehaviour
         }
     }
 
+    [System.Serializable]
+    public class PerfData
+    {
+        public int numParticles;
+        public float fps;
+        public PerfData(int p, float f)
+        {
+            numParticles = p; fps = f;
+        }
+    }
+    [System.Serializable]
+    public class PerfWrapper
+    {
+        public PerfData[] data;
+        public PerfWrapper(PerfData[] d) { data = d; }
+    }
+
+    public void DoBenchmark()
+    {
+        StartCoroutine(CheckPerformance());
+    }
+
+    public IEnumerator CheckPerformance()
+    {
+        List<PerfData> results = new List<PerfData>();
+        //int maxNumParticles = 30000;
+        int increment = 500;
+        float settleTime = 2f;
+        Debug.Log("Benchmarking...");
+
+        float lastFPSval = float.PositiveInfinity;
+        int curNumParticles = 0;
+        while(lastFPSval > 10)//(curNumParticles < maxNumParticles)
+        {
+            // set sim num particles
+            numParticles = curNumParticles;
+
+            yield return new WaitForSecondsRealtime(settleTime);
+            float fps = GetAverageFPS();
+            results.Add(new PerfData(curNumParticles, fps));
+
+            Debug.Log(curNumParticles + ", " + fps);
+
+            lastFPSval = fps;
+            curNumParticles += increment;
+        } 
+
+        Debug.Log("Done");
+        string jsonStr = JsonUtility.ToJson(new PerfWrapper(results.ToArray()));
+        Debug.Log(jsonStr);
+    }
+
+    List<float> fpsSamples = new List<float>();
+    int fpsMaxSamples = 20;
+    public float GetAverageFPS()
+    {
+        float avg = 0;
+        foreach (float sample in fpsSamples)
+        {
+            avg += sample;
+        }
+        avg /= fpsSamples.Count;
+
+        return avg;
+    }
+
     bool isFirstUpdate = true;
     private void Update()
     {
@@ -308,6 +376,10 @@ public class FireSim : MonoBehaviour
         {
             fpsLastVal = (int)(1 / Time.smoothDeltaTime);
             fpsLastDrawTime = Time.time;
+
+            fpsSamples.Add(fpsLastVal);     //add to end
+            if (fpsSamples.Count > fpsMaxSamples) 
+                fpsSamples.RemoveAt(0);
         }
 
         // Make sure the number of particles hasn't changed.
