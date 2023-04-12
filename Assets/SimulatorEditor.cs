@@ -16,6 +16,11 @@ public class SimulatorEditor : Editor
             fs.RespawnParticles();
         }
 
+        if (GUILayout.Button("Start FPS benchmark"))
+        {
+            fs.DoBenchmark();
+        }
+
         GUILayout.Label("Select debug configuration");
         // Select labels and prepend "None"
         string[] options = fs.debugConfigurations.Select(x => x.description).Prepend("None").ToArray();

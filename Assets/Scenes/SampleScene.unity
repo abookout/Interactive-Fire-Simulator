@@ -152,38 +152,66 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 351b14e78a2db8a418b8fd201cb75dd8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  showFPS: 0
   debugConfigurations:
   - description: 1
     particles:
-    - fixInSpace: 0
+    - fixInSpace: 1
       position: {x: 0, y: 0, z: 0}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 20
     - fixInSpace: 1
-      position: {x: 0.25, y: 0, z: 0}
+      position: {x: 0.1, y: 0, z: 0}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
     - fixInSpace: 1
-      position: {x: 0, y: 0.25, z: 0}
+      position: {x: 0, y: 0.1, z: 0}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
     - fixInSpace: 1
-      position: {x: 0, y: 0, z: 0.25}
+      position: {x: 0, y: 0, z: 0.1}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
     - fixInSpace: 1
-      position: {x: 0.25, y: 0.25, z: 0.25}
+      position: {x: 0.1, y: 0.1, z: 0.1}
       velocity: {x: 0, y: 0, z: 0}
+      temperature: 0
+  - description: 2
+    particles:
+    - fixInSpace: 1
+      position: {x: 0, y: 0, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+      temperature: 50
+    - fixInSpace: 1
+      position: {x: 0.5, y: 0, z: 0}
+      velocity: {x: 0, y: 0, z: 0}
+      temperature: 1
   selectedDebugConfiguration: 0
   particleSystem: {fileID: 2054306561}
-  numParticles: 4096
-  particleMass: 1
-  viscosity: 18
+  numParticles: 3000
+  particleMass: 0.5
+  viscosity: 80
   pressureStiffness: 10
-  referenceDensity: 2
+  referenceDensity: 8
+  ambientTemperature: 25
+  temperatureDiffusionRate: 0.1
   externalAccelerations: {x: 0, y: 0, z: 0}
-  spawnVolumeWidth: 6.72
+  spawnEvenlySpaced: 0
   usePeriodicBoundary: 1
+  resetTemperatureOnPassingPeriodicBoundary: 1
+  spawnVolumeWidth: 4
   particleBounds:
     m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 4, y: 4, z: 4}
-  spawnEvenlySpaced: 0
+    m_Extent: {x: 2, y: 2, z: 2}
+  flameParticleColor: {r: 1, g: 0.13757895, b: 0, a: 1}
+  coolParticleColor: {r: 0.990566, g: 0.80833924, b: 0.80833924, a: 0.03529412}
+  colorByHeat: 0
+  flameTempThreshold: 800
+  useHeatSource: 0
+  heatSourceTemperature: 2000
+  heatSourceBounds:
+    m_Center: {x: 0, y: -1.33, z: 0}
+    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
   SPHComputeShader: {fileID: 7200000, guid: 397a5bac8dab5a249bfa127ecb71b59b, type: 3}
 --- !u!4 &299583915
 Transform:
@@ -193,7 +221,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 299583913}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 8.276856, y: 10.018352, z: -26.34303}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -211,6 +239,7 @@ GameObject:
   - component: {fileID: 330585546}
   - component: {fileID: 330585545}
   - component: {fileID: 330585544}
+  - component: {fileID: 330585547}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -284,14 +313,34 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_LocalRotation: {x: 0.10212373, y: 0.76140386, z: -0.12379789, w: 0.62809956}
-  m_LocalPosition: {x: -14.27, y: 3.84, z: 1.79}
+  m_LocalRotation: {x: 0.07532678, y: 0, z: 0, w: 0.99715894}
+  m_LocalPosition: {x: 0, y: 1, z: -8.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 18.47, y: 100.96, z: 0}
+  m_LocalEulerAnglesHint: {x: 8.64, y: 0, z: 0}
+--- !u!114 &330585547
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 40071472c5457454eaa07d40d0edc8cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cam: {fileID: 0}
+  smoothTime: 0.2
+  mouseRotateSpeed: 5
+  initialZoom: 15
+  minZoom: 2
+  maxZoom: 20
+  zoomSmoothTime: 0.2
+  zoomSpeed: 10
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -379,7 +428,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
-  m_LocalPosition: {x: 0, y: 3, z: 0}
+  m_LocalPosition: {x: 0, y: 58.43, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -4688,9 +4737,9 @@ ParticleSystem:
         m_NumColorKeys: 2
         m_NumAlphaKeys: 2
   CustomDataModule:
-    enabled: 0
+    enabled: 1
     mode0: 1
-    vectorComponentCount0: 4
+    vectorComponentCount0: 1
     color0:
       serializedVersion: 2
       minMaxState: 0
