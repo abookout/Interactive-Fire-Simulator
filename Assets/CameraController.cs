@@ -30,6 +30,8 @@ public class CameraController : MonoBehaviour
 
     private void Start()
     {
+        //TODO: makes parameter redundant
+        initialZoom = transform.position.magnitude;     // distance from focus to camera
         zoomFactor = initialZoom;
         zoomTarget = initialZoom;
         cam = Camera.main;

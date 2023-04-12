@@ -56,6 +56,8 @@ public class FireSim : MonoBehaviour
 
     Material particleMaterial;
 
+    public bool showFPS = false;
+
     [Header("Debug configurations")]
     public List<DebugConfiguration> debugConfigurations;
     public int selectedDebugConfiguration = 0;          // 0 means none are selected
@@ -84,6 +86,7 @@ public class FireSim : MonoBehaviour
     [Header("Temperature attributes")]
     [SerializeField] Color flameParticleColor;
     [SerializeField] Color coolParticleColor;
+    [SerializeField] bool colorByHeat;
     [SerializeField] float flameTempThreshold = 100;    // Min temp for particle to be a part of fire (and be rendered)
 
     [Header("Heat source attributes")]
@@ -200,10 +203,13 @@ public class FireSim : MonoBehaviour
     float fpsLastDrawTime = 0;
     private void OnGUI()
     {
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 20;
-        style.normal.textColor = Color.white;
-        GUI.TextField(new Rect(5, 5, 20, 100), "FPS " + fpsLastVal, style);
+        if (showFPS)
+        {
+            GUIStyle style = new GUIStyle();
+            style.fontSize = 20;
+            style.normal.textColor = Color.white;
+            GUI.TextField(new Rect(5, 5, 20, 100), "FPS " + fpsLastVal, style);
+        }
     }
 
     float MapRange(float val, float from1, float to1, float from2, float to2)
@@ -778,7 +784,8 @@ public class FireSim : MonoBehaviour
             }
 
             // Color based on temp
-            particlesArr[i].startColor = newTemperature > flameTempThreshold ? flameParticleColor : coolParticleColor;
+            //TODO make this not ugly
+            particlesArr[i].startColor = !colorByHeat ? flameParticleColor : (newTemperature > flameTempThreshold ? flameParticleColor : coolParticleColor);
         }
     }
 

@@ -4,7 +4,7 @@
 #pragma kernel ComputePosAndVel
 
 //TODO: for debugging - makes performance way worse!
-#pragma enable_d3d11_debug_symbols
+//#pragma enable_d3d11_debug_symbols
 
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
@@ -18,7 +18,7 @@
 #define sInv (1 / KernelSupport)
 
 //TODO: pay attention to timestep!!! Should be defined by unity?
-#define Timestep 0.05f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
+#define Timestep 0.03f ///////////~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Just for CFL condition? 
 #define ParticleDiameter 0.001f
@@ -45,8 +45,7 @@ half _PressureStiffness;
 half _ReferenceDensity;
 half _AmbientTemperature;
 half _HeatDiffusionRate;
-// Magnitude of force due to gravity, and all other external accelerations. Note: when applying a force to a single particle, 
-//	need to scale by the particle's local density! text p. 288
+// Note: when applying a force to a single particle, need to scale by the particle's local density! text p. 288
 
 StructuredBuffer<ParticleData> _DataInputBuffer : register(t1);
 StructuredBuffer<float3> _AccelerationInputBuffer : register(t2);
@@ -59,13 +58,6 @@ RWStructuredBuffer<float> _DensityBuf : register(u3);
 RWStructuredBuffer<float3> _PressureGradientBuf : register(u4);
 RWStructuredBuffer<float> _TemperatureDiffusionBuf : register(u5);
 RWStructuredBuffer<float3> _DiffusionBuf : register(u6);
-
-// Assume total shared memory of 16KB. Across 64 threads is 250 bytes per thread. Across 128 threads is 125B.
-
-// Acceleration outputs
-
-//TODO: is there a max of about 16000 particles? Because of groupshared memory limit and float3 size
-//	maybe unless we do calculations for more than one particle per thread!
 
 // The kernel function varies with distance from the center. If xi is the position of particle i and 
 //  x is some point in space, r=x-xi is the distance between them.
