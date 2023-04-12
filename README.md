@@ -1,4 +1,4 @@
-This is a real-time particle-based fire simulation using SPH. It's implemented in compute shaders on the GPU using HLSL.
+This is a real-time particle-based fire simulation using SPH. It's implemented in a compute shader on the GPU using HLSL with Unity.
 
 ## Demos
 
