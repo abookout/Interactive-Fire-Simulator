@@ -205,9 +205,9 @@ MonoBehaviour:
     m_Extent: {x: 2, y: 2, z: 2}
   flameParticleColor: {r: 1, g: 0.13757895, b: 0, a: 1}
   coolParticleColor: {r: 0.990566, g: 0.80833924, b: 0.80833924, a: 0.03529412}
-  colorByHeat: 0
-  flameTempThreshold: 800
-  useHeatSource: 0
+  colorByHeat: 1
+  flameTempThreshold: 750
+  useHeatSource: 1
   heatSourceTemperature: 2000
   heatSourceBounds:
     m_Center: {x: 0, y: -1.33, z: 0}

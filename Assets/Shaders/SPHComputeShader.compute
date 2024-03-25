@@ -4,7 +4,7 @@
 #pragma kernel ComputePosAndVel
 
 //TODO: for debugging - makes performance way worse!
-//#pragma enable_d3d11_debug_symbols
+#pragma enable_d3d11_debug_symbols
 
 // Number of threads per thread group. Should match with the CPU code invoking this!
 #define ThreadGroupSize 64
@@ -58,6 +58,8 @@ RWStructuredBuffer<float> _DensityBuf : register(u3);
 RWStructuredBuffer<float3> _PressureGradientBuf : register(u4);
 RWStructuredBuffer<float> _TemperatureDiffusionBuf : register(u5);
 RWStructuredBuffer<float3> _DiffusionBuf : register(u6);
+
+// RWStructuredBuffer<int> _NNBuf : register(u7); // buffer for storing results of nearest neighbor calculations
 
 // The kernel function varies with distance from the center. If xi is the position of particle i and 
 //  x is some point in space, r=x-xi is the distance between them.
@@ -144,6 +146,32 @@ uint3 flatTo3D(uint1 val, int w, int h)
 	return uint3(fmod(val, w), fmod(val / w, h), floor(val / (w * h)));
 }
 */
+
+//		BUILDING THE NEAREST-NEIGHBOR GRID (https://raw.githubusercontent.com/NVIDIA/cuda-samples/master/Samples/2_Concepts_and_Techniques/particles/doc/particles.pdf)
+// - supports a variable number of particles by using a two-pass approach. 
+// - In the first pass, we count the number of particles per grid cell using an atomic increment 
+//   - gridCounters global array: stores the number of particles in each cell (cell idx = array idx)
+//
+// - We then perform a parallel prefix sum (scan) operation to calculate the destination addresses for each particle (see the �scan� sample in the SDK). 
+//
+// - In the final pass we examine all the particles again, and write them to contiguous locations in the grid array using the results of the scan.
+
+//TODO: use kernel
+// Assign each particle to a grid cell for nearest neighbor
+// [numthreads(ThreadGroupSize, 1, 1)]
+// void AssignParticlesNN()
+// {
+	
+// }
+
+// //TODO: use kernel
+// [numthreads(ThreadGroupSize, 1, 1)]
+// void SortParticlesNN()
+// {
+	
+// }
+
+
 
 // The computation is organized into separate kernels because each one depends on the completion of the previous. There's no way to wait for all threads
 //	to complete, as not all threads are executed simultaneously.
